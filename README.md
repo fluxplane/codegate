@@ -13,6 +13,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 ## Features
 
 - `fs.FS`-backed workspaces with in-memory overlay commits.
+- Direct source/workspace integration via `editor.WithSource`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
 - Pluggable language backend contract via `editor.Backend`.
 - Go AST backend for:
@@ -102,7 +103,7 @@ The root package exposes the public facade and language-neutral model. The share
 Core responsibilities:
 
 - hold a logical workspace root
-- read source from an explicit `fs.FS`
+- read source from an explicit `fs.FS` or `editor.Source`
 - maintain in-memory overlays
 - dispatch language operations to registered backends
 - apply language-neutral text edits
@@ -118,15 +119,14 @@ Backend responsibilities:
 
 ## Go Support Status
 
-The Go backend is AST-only. It is useful for source navigation and deterministic edits, but it does not yet provide full `go/types` precision.
+The Go backend is AST-only. It is useful for source navigation and deterministic edits without requiring local disk access or toolchain loading.
 
 Current limitations:
 
-- no external dependency resolution
-- no build tag or cgo variant handling
-- no precise method-set or interface dispatch semantics
 - no function-value call resolution
-- no module-aware import path resolution through `go list`
+- no complete interface dispatch or dynamic call graph
+- no typechecked package loading in core
+- no module-aware import graph through `go list`
 - no hidden execution of `go test`, `go build`, `go fmt`, or other toolchain commands
 
 These limitations are intentional in core. Toolchain execution and disk persistence should be explicit adapters.
@@ -135,10 +135,10 @@ These limitations are intentional in core. Toolchain execution and disk persiste
 
 Upcoming work:
 
-1. Add optional type-aware Go backend support using `golang.org/x/tools/go/packages`.
-2. Add an explicit OS filesystem adapter for durable commits outside core.
+1. Add an explicit OS filesystem adapter for durable commits outside core.
+2. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 3. Add an agentruntime adapter so existing Go parser tools can become thin wrappers over `editor`.
-4. Improve Go call/reference precision for selectors, methods, fields, and package-qualified symbols.
+4. Improve field/write/read occurrence classification and dynamic call limitations.
 5. Add richer refactor operations such as rename symbol, update call sites, import rewrites, and move declarations.
 6. Add validation adapters for parse/typecheck/build/test workflows.
 7. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.

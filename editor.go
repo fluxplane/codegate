@@ -21,6 +21,7 @@ type Option func(*Editor) error
 type Editor struct {
 	root      string
 	fsys      fs.FS
+	source    Source
 	languages []LanguageID
 	backends  map[LanguageID]Backend
 
@@ -32,7 +33,7 @@ func New(root string, opts ...Option) (*Editor, error) {
 	ed := &Editor{
 		root:      core.CleanPath(root),
 		languages: []LanguageID{Go},
-		backends:  map[LanguageID]Backend{Go: goast.New()},
+		backends:  map[LanguageID]Backend{},
 		overlay:   map[string][]byte{},
 	}
 	for _, opt := range opts {
@@ -40,8 +41,11 @@ func New(root string, opts ...Option) (*Editor, error) {
 			return nil, err
 		}
 	}
-	if ed.fsys == nil {
-		return nil, errors.New("editor: WithFS is required")
+	if ed.fsys == nil && ed.source == nil {
+		return nil, errors.New("editor: WithFS or WithSource is required")
+	}
+	if _, ok := ed.backends[Go]; !ok {
+		ed.backends[Go] = goast.New()
 	}
 	for _, lang := range ed.languages {
 		if _, ok := ed.backends[lang]; !ok {
@@ -57,6 +61,16 @@ func WithFS(fsys fs.FS) Option {
 			return errors.New("editor: nil fs.FS")
 		}
 		ed.fsys = fsys
+		return nil
+	}
+}
+
+func WithSource(source Source) Option {
+	return func(ed *Editor) error {
+		if source == nil {
+			return errors.New("editor: nil source")
+		}
+		ed.source = source
 		return nil
 	}
 }
@@ -164,7 +178,7 @@ func (e *Editor) Navigate(ctx context.Context, pos PositionSelector, opts Naviga
 		Symbols:        symbols,
 		Locations:      locations,
 		Diagnostics:    diagnostics,
-		ResolutionMode: "ast",
+		ResolutionMode: e.resolutionMode(scope),
 		Complete:       false,
 		Warnings:       []string{"AST-only resolution: no type checking, external dependency resolution, build-tag/cgo semantics, interface dispatch, or function-value dispatch."},
 		Indexed:        true,
@@ -351,12 +365,26 @@ func (e *Editor) ImportGraph(ctx context.Context, query ImportQuery) (ImportResu
 		ReverseImporters: reverse,
 		TargetImportPath: target,
 		Diagnostics:      idx.Diagnostics,
-		ResolutionMode:   "ast",
+		ResolutionMode:   e.resolutionMode(scope),
 		Complete:         false,
 		Warnings:         []string{"AST-only import scan: no go list/module import path resolution."},
 		Indexed:          true,
 		Fresh:            true,
 	}, nil
+}
+
+func (e *Editor) resolutionMode(scope Scope) string {
+	mode := "ast"
+	for _, backend := range e.selectedBackends(scope) {
+		spec := backend.Spec()
+		if spec.ResolutionMode == "hybrid" || spec.ResolutionMode == "typecheck" {
+			return spec.ResolutionMode
+		}
+		if spec.ResolutionMode != "" {
+			mode = spec.ResolutionMode
+		}
+	}
+	return mode
 }
 
 func (e *Editor) Metrics(ctx context.Context, scope Scope) (Metrics, error) {
@@ -534,6 +562,13 @@ func (e *Editor) readFileWithOverlay(filePath string, overlay map[string][]byte)
 		return append([]byte(nil), b...), nil
 	}
 	e.mu.RUnlock()
+	if e.source != nil {
+		b, err := e.source.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
+		return append([]byte(nil), b...), nil
+	}
 	b, err := fs.ReadFile(e.fsys, filePath)
 	if err != nil {
 		return nil, err
@@ -594,6 +629,35 @@ func (e *Editor) snapshot(overlay map[string][]byte) editorSnapshot {
 func (s editorSnapshot) ListFiles(ctx context.Context, scope Scope) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+	if s.editor.source != nil {
+		files, err := s.editor.source.ListFiles(ctx, scope)
+		if err != nil {
+			return nil, err
+		}
+		root := core.CleanPath(firstNonEmpty(scope.Path, scope.Root, s.editor.root))
+		seen := map[string]bool{}
+		for _, file := range files {
+			seen[core.CleanPath(file)] = true
+		}
+		s.editor.mu.RLock()
+		for p := range s.editor.overlay {
+			if inScopePath(p, root) {
+				seen[core.CleanPath(p)] = true
+			}
+		}
+		s.editor.mu.RUnlock()
+		for p := range s.overlay {
+			if inScopePath(p, root) {
+				seen[core.CleanPath(p)] = true
+			}
+		}
+		out := make([]string, 0, len(seen))
+		for file := range seen {
+			out = append(out, file)
+		}
+		sort.Strings(out)
+		return out, nil
 	}
 	return s.editor.listFiles(scope, s.overlay)
 }

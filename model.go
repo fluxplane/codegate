@@ -7,6 +7,7 @@ type (
 	BackendInfo       = core.BackendInfo
 	BackendSpec       = core.BackendSpec
 	Backend           = core.Backend
+	Source            = core.Snapshot
 	Document          = core.Document
 	PackageInfo       = core.PackageInfo
 	Position          = core.Position

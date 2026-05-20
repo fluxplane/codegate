@@ -20,7 +20,7 @@ func New() GoBackend {
 	return GoBackend{}
 }
 
-func (GoBackend) Spec() BackendSpec {
+func (b GoBackend) Spec() BackendSpec {
 	return BackendSpec{
 		Language:       Go,
 		Name:           "goast",

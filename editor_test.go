@@ -410,6 +410,52 @@ func TestCustomBackendIntegration(t *testing.T) {
 	}
 }
 
+func TestEditorWithSource(t *testing.T) {
+	ctx := context.Background()
+	source := mapSource{
+		files: map[string][]byte{
+			"main.go": []byte("package main\n\nfunc main() {}\n"),
+		},
+	}
+	ed, err := New(".", WithSource(source), WithLanguage(Go))
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols, err := ed.FindSymbols(ctx, SymbolSelector{Name: "main", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(symbols) != 1 {
+		t.Fatalf("expected source-backed main symbol, got %#v", symbols)
+	}
+}
+
+type mapSource struct {
+	files map[string][]byte
+}
+
+func (s mapSource) ListFiles(ctx context.Context, scope Scope) ([]string, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	var files []string
+	root := strings.Trim(scope.Path, "/")
+	for file := range s.files {
+		if root == "" || root == "." || file == root || strings.HasPrefix(file, root+"/") {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
+
+func (s mapSource) ReadFile(path string) ([]byte, error) {
+	data, ok := s.files[path]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return append([]byte(nil), data...), nil
+}
+
 func newTestEditorWithOptions(t *testing.T, files map[string]string, opts ...Option) *Editor {
 	t.Helper()
 	fsys := fstest.MapFS{}
