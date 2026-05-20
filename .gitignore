@@ -1,0 +1,28 @@
+.DS_Store
+
+# Go build/test outputs
+bin/
+dist/
+build/
+coverage.out
+*.coverprofile
+*.test
+*.prof
+
+# Go workspace/local module state
+go.work
+go.work.sum
+
+# Editor and IDE metadata
+.idea/
+*.iml
+.vscode/
+
+# Local caches and temporary files
+.cache/
+.tmp/
+tmp/
+
+# Agent/runtime local state
+.codex/
+.agents/index/
