@@ -77,7 +77,7 @@ func (c *ChangeSet) Files(ctx context.Context) ([]ChangedFile, error) {
 	sort.Strings(paths)
 	files := make([]ChangedFile, 0, len(paths))
 	for _, p := range paths {
-		before, err := c.editor.readFileWithOverlay(p, nil)
+		before, err := c.editor.readFileWithOverlay(ctx, p, nil)
 		if err != nil {
 			before = nil
 		}
@@ -113,7 +113,7 @@ func (c *ChangeSet) Discard() error {
 func (c *ChangeSet) applyFileEdits(ctx context.Context, fileEdits []FileEdit) error {
 	for _, fe := range fileEdits {
 		p := core.CleanPath(fe.Path)
-		src, err := c.editor.readFileWithOverlay(p, c.overlay)
+		src, err := c.editor.readFileWithOverlay(ctx, p, c.overlay)
 		if err != nil {
 			return err
 		}

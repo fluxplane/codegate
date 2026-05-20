@@ -14,6 +14,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 
 - `fs.FS`-backed workspaces with in-memory overlay commits.
 - Direct source/workspace integration via `editor.WithSource`.
+- Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
 - Pluggable language backend contract via `editor.Backend`.
 - Go AST backend for:
@@ -96,6 +97,34 @@ func hello() string {
 }
 ```
 
+## Agentruntime Integration
+
+Use `adapter/agentruntime` to bridge an agentruntime workspace without adding an agentruntime dependency to core:
+
+```go
+source, err := agentruntime.NewWalkSource(
+	func(ctx context.Context, path string, maxBytes int64) ([]byte, bool, error) {
+		data, truncated, _, err := workspace.ReadFile(ctx, path, maxBytes)
+		return data, truncated, err
+	},
+	func(ctx context.Context, root string, opts agentruntime.WalkOptions) ([]agentruntime.WalkEntry, bool, error) {
+		entries, _, truncated, err := workspace.Walk(ctx, root, system.WalkOptions{
+			Depth:      opts.Depth,
+			ShowHidden: opts.ShowHidden,
+			MaxEntries: opts.MaxEntries,
+			FilesOnly:  opts.FilesOnly,
+			SkipDirs:   opts.SkipDirs,
+		})
+		out := make([]agentruntime.WalkEntry, 0, len(entries))
+		for _, entry := range entries {
+			out = append(out, agentruntime.WalkEntry{Path: entry.Path.Rel, Kind: entry.Kind})
+		}
+		return out, truncated, err
+	},
+)
+ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor.Go))
+```
+
 ## Architecture
 
 The root package exposes the public facade and language-neutral model. The shared internal model and backend contract live in `internal/core`; the Go implementation lives in `internal/lang/goast`.
@@ -109,6 +138,8 @@ Core responsibilities:
 - apply language-neutral text edits
 - generate diffs and commit overlays
 
+Adapters live outside core. They translate host-specific workspace APIs into `editor.Source` without making the editor depend on those hosts.
+
 Backend responsibilities:
 
 - parse/index language files
@@ -120,6 +151,15 @@ Backend responsibilities:
 ## Go Support Status
 
 The Go backend is AST-only. It is useful for source navigation and deterministic edits without requiring local disk access or toolchain loading.
+
+Supported today:
+
+- package discovery from `.go` files
+- declarations, references, direct calls, imports, and simple implementation edges
+- source reads by symbol or source position
+- deterministic edits for functions, comments, symbol deletion, and struct tags
+- metrics and AST-derived refactoring proposals
+- agentruntime-style source integration through context-aware reads and workspace walks
 
 Current limitations:
 
@@ -135,9 +175,9 @@ These limitations are intentional in core. Toolchain execution and disk persiste
 
 Upcoming work:
 
-1. Add an explicit OS filesystem adapter for durable commits outside core.
-2. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
-3. Add an agentruntime adapter so existing Go parser tools can become thin wrappers over `editor`.
+1. Replace the existing agentruntime Go language plugin internals with calls into this library.
+2. Add an explicit OS filesystem adapter for durable commits outside core.
+3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 4. Improve field/write/read occurrence classification and dynamic call limitations.
 5. Add richer refactor operations such as rename symbol, update call sites, import rewrites, and move declarations.
 6. Add validation adapters for parse/typecheck/build/test workflows.

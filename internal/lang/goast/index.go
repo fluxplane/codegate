@@ -89,7 +89,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 		if !strings.HasSuffix(p, ".go") || (!scope.IncludeTests && core.HasTestPath(p)) {
 			continue
 		}
-		src, err := snapshot.ReadFile(p)
+		src, err := snapshot.ReadFile(ctx, p)
 		if err != nil {
 			idx.diagnostics = append(idx.diagnostics, Diagnostic{Severity: "error", Message: err.Error()})
 			continue

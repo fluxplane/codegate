@@ -91,7 +91,7 @@ func (c editCompiler) compileAppendFunction(ctx context.Context, op AppendFuncti
 		sort.Strings(files)
 		p = files[0]
 	}
-	src, err := c.snapshot.ReadFile(p)
+	src, err := c.snapshot.ReadFile(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (c editCompiler) compileDeleteSymbol(ctx context.Context, op DeleteSymbol) 
 	if sym.Kind == SymbolField {
 		return nil, errors.New("editor: DeleteSymbol does not delete fields; use struct tag operations for field metadata")
 	}
-	src, err := c.snapshot.ReadFile(sym.Location.URI)
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (c editCompiler) compileReplaceComment(ctx context.Context, op ReplaceComme
 		return nil, exactMatchErr("symbol", len(matches))
 	}
 	sym := matches[0]
-	src, err := c.snapshot.ReadFile(sym.Location.URI)
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (c editCompiler) compileEnsureStructTag(ctx context.Context, op EnsureGoStr
 		return nil, exactMatchErr("struct", len(matches))
 	}
 	sym := matches[0]
-	src, err := c.snapshot.ReadFile(sym.Location.URI)
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (c editCompiler) compileRemoveStructTag(ctx context.Context, op RemoveGoStr
 		return nil, exactMatchErr("struct", len(matches))
 	}
 	sym := matches[0]
-	src, err := c.snapshot.ReadFile(sym.Location.URI)
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
 	}

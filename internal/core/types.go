@@ -25,7 +25,7 @@ type BackendSpec struct {
 
 type Snapshot interface {
 	ListFiles(ctx context.Context, scope Scope) ([]string, error)
-	ReadFile(path string) ([]byte, error)
+	ReadFile(ctx context.Context, path string) ([]byte, error)
 }
 
 type Backend interface {

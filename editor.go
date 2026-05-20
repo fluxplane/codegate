@@ -158,7 +158,7 @@ func (e *Editor) Navigate(ctx context.Context, pos PositionSelector, opts Naviga
 	if pos.Offset != nil {
 		offset = *pos.Offset
 	} else {
-		b, err := e.readFileWithOverlay(core.CleanPath(pos.Path), nil)
+		b, err := e.readFileWithOverlay(ctx, core.CleanPath(pos.Path), nil)
 		if err != nil {
 			return NavigationResult{}, err
 		}
@@ -412,7 +412,7 @@ func (e *Editor) readSymbol(ctx context.Context, sel SymbolSelector, overlay map
 		return SourceFragment{}, fmt.Errorf("editor: selector is ambiguous: %d symbols match", len(matches))
 	}
 	sym := matches[0]
-	b, err := e.readFileWithOverlay(sym.Location.URI, overlay)
+	b, err := e.readFileWithOverlay(ctx, sym.Location.URI, overlay)
 	if err != nil {
 		return SourceFragment{}, err
 	}
@@ -549,7 +549,10 @@ func (e *Editor) backendForOperation(op Operation) (Backend, error) {
 	return nil, fmt.Errorf("editor: no backend supports operation %q", op.Kind())
 }
 
-func (e *Editor) readFileWithOverlay(filePath string, overlay map[string][]byte) ([]byte, error) {
+func (e *Editor) readFileWithOverlay(ctx context.Context, filePath string, overlay map[string][]byte) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	filePath = core.CleanPath(filePath)
 	if overlay != nil {
 		if b, ok := overlay[filePath]; ok {
@@ -563,7 +566,7 @@ func (e *Editor) readFileWithOverlay(filePath string, overlay map[string][]byte)
 	}
 	e.mu.RUnlock()
 	if e.source != nil {
-		b, err := e.source.ReadFile(filePath)
+		b, err := e.source.ReadFile(ctx, filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -662,8 +665,8 @@ func (s editorSnapshot) ListFiles(ctx context.Context, scope Scope) ([]string, e
 	return s.editor.listFiles(scope, s.overlay)
 }
 
-func (s editorSnapshot) ReadFile(filePath string) ([]byte, error) {
-	return s.editor.readFileWithOverlay(filePath, s.overlay)
+func (s editorSnapshot) ReadFile(ctx context.Context, filePath string) ([]byte, error) {
+	return s.editor.readFileWithOverlay(ctx, filePath, s.overlay)
 }
 
 func firstNonEmpty(values ...string) string {

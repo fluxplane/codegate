@@ -471,7 +471,10 @@ func (s mapSource) ListFiles(ctx context.Context, scope Scope) ([]string, error)
 	return files, nil
 }
 
-func (s mapSource) ReadFile(path string) ([]byte, error) {
+func (s mapSource) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	data, ok := s.files[path]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -516,7 +519,7 @@ func (fakeBackend) Index(ctx context.Context, snapshot core.Snapshot, scope Scop
 		if filepath.Ext(file) != ".fake" {
 			continue
 		}
-		src, err := snapshot.ReadFile(file)
+		src, err := snapshot.ReadFile(ctx, file)
 		if err != nil {
 			return nil, err
 		}
