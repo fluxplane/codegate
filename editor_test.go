@@ -414,7 +414,12 @@ func TestEditorWithSource(t *testing.T) {
 	ctx := context.Background()
 	source := mapSource{
 		files: map[string][]byte{
-			"main.go": []byte("package main\n\nfunc main() {}\n"),
+			"main.go": []byte(`package main
+
+func main() {}
+
+func unusedHelper(flag bool, a int, b int, c int, d int) {}
+`),
 		},
 	}
 	ed, err := New(".", WithSource(source), WithLanguage(Go))
@@ -427,6 +432,24 @@ func TestEditorWithSource(t *testing.T) {
 	}
 	if len(symbols) != 1 {
 		t.Fatalf("expected source-backed main symbol, got %#v", symbols)
+	}
+	metrics, err := ed.Metrics(ctx, Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metrics.Units) != 1 || metrics.Units[0].UnitID != "main" {
+		t.Fatalf("expected source-backed metrics, got %#v", metrics)
+	}
+	proposals, err := ed.SuggestRefactorings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[RefactorKind]bool{}
+	for _, proposal := range proposals {
+		kinds[proposal.Kind] = true
+	}
+	if !kinds[RefactorDeleteSymbol] || !kinds[RefactorIntroduceConfig] || !kinds[RefactorReplaceFlagArgument] {
+		t.Fatalf("expected source-backed refactor suggestions, got %#v", proposals)
 	}
 }
 
