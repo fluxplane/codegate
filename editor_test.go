@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -366,25 +367,65 @@ func offsetOf(t *testing.T, src, needle string) int {
 	return offset
 }
 
-func TestRootPackageDoesNotImportGoASTPackages(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" || strings.HasSuffix(entry.Name(), "_test.go") {
+func TestGoParserPackagesOnlyLiveInGoBackend(t *testing.T) {
+	files := productionGoFiles(t)
+	for _, file := range files {
+		if strings.HasPrefix(file, "internal/lang/goast/") {
 			continue
 		}
-		src, err := os.ReadFile(entry.Name())
+		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{`"go/ast"`, `"go/parser"`, `"go/token"`, `"go/format"`} {
+		for _, forbidden := range []string{`"go/ast"`, `"go/parser"`, `"go/token"`, `"go/format"`, `"go/types"`, `"golang.org/x/tools/go/packages"`} {
 			if strings.Contains(string(src), forbidden) {
-				t.Fatalf("%s imports %s; Go parser packages must stay in internal/lang/goast", entry.Name(), forbidden)
+				t.Fatalf("%s imports %s; Go parser/type packages must stay in language-specific backends", file, forbidden)
 			}
 		}
 	}
+}
+
+func TestCoreDoesNotUseHostOSOrProcessExecution(t *testing.T) {
+	for _, file := range productionGoFiles(t) {
+		if strings.HasPrefix(file, "adapter/") || strings.HasPrefix(file, "internal/lang/") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{`"os"`, `"os/exec"`, "exec.Command", "git "} {
+			if strings.Contains(string(src), forbidden) {
+				t.Fatalf("%s contains forbidden core dependency or command marker %q", file, forbidden)
+			}
+		}
+	}
+}
+
+func productionGoFiles(t *testing.T) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch p {
+			case ".git", ".agents":
+				return filepath.SkipDir
+			default:
+				return nil
+			}
+		}
+		if filepath.Ext(p) == ".go" && !strings.HasSuffix(p, "_test.go") {
+			files = append(files, filepath.ToSlash(p))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 func TestCustomBackendIntegration(t *testing.T) {
