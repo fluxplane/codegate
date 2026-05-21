@@ -34,7 +34,21 @@ The intended loop is:
 lookup -> assess -> suggest -> apply -> validate -> reassess
 ```
 
-## Quick Start
+## Getting Started
+
+Install the CLI:
+
+```sh
+go install github.com/fluxplane/codegate/cmd/codegate@latest
+```
+
+Run an assessment from a workspace root:
+
+```sh
+codegate --root . --language go assess --gate all
+```
+
+## Go API Quick Start
 
 ```go
 package main
@@ -188,21 +202,21 @@ Markdown also has a conservative fix loop. Missing H1 titles, heading-level jump
 The `cmd/codegate` CLI exposes the same engine loop as JSON-first commands:
 
 ```sh
-go run ./cmd/codegate --root . --language go capabilities
-go run ./cmd/codegate --root . --language go lookup --name Target --kind function
-go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
-go run ./cmd/codegate --root . --language go assess --gate all --view full --suggestions 3
-go run ./cmd/codegate --root . --language go assess --gate all --summary-only
-go run ./cmd/codegate --root . --language go --format html assess --gate all > codegate-report.html
-go run ./cmd/codegate --root . --language go --generated assess --gate all
-go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
-go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
-go run ./cmd/codegate --root . --language go suggest --executable
-go run ./cmd/codegate --root . --language go op run --kind go_module_path_rename --from github.com/old/module --to github.com/new/module
-go run ./cmd/codegate --root . --language go op run --operation-file operation.json --patch operation.patch
-go run ./cmd/codegate --root . --language go cycle
-go run ./cmd/codegate --root . --language markdown assess --gate maintainability
-go run ./cmd/codegate --root . --language markdown cycle --apply-first
+codegate --root . --language go capabilities
+codegate --root . --language go lookup --name Target --kind function
+codegate --root . --language go assess --gate all --suggestions 3
+codegate --root . --language go assess --gate all --view full --suggestions 3
+codegate --root . --language go assess --gate all --summary-only
+codegate --root . --language go --format html assess --gate all > codegate-report.html
+codegate --root . --language go --generated assess --gate all
+codegate --root . --language go assess --gate architecture --rules codegate.rules.json
+codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
+codegate --root . --language go suggest --executable
+codegate --root . --language go op run --kind go_module_path_rename --from github.com/old/module --to github.com/new/module
+codegate --root . --language go op run --operation-file operation.json --patch operation.patch
+codegate --root . --language go cycle
+codegate --root . --language markdown assess --gate maintainability
+codegate --root . --language markdown cycle --apply-first
 ```
 
 `assess --fail-on` prints the normal JSON report first, then exits non-zero if a selected category has an unallowed violation. Supported categories are `boundary`, `test-boundary`, `effects`, `unknown`, and `all`.
@@ -233,7 +247,7 @@ For Go-specific badges, use the Go brand color `00ADD8`. If you prefer score-sev
 Bot update recipe:
 
 ```sh
-go run ./cmd/codegate --root . --language go --format json assess --gate all > /tmp/codegate-assessment.json
+codegate --root . --language go --format json assess --gate all > /tmp/codegate-assessment.json
 score="$(jq -r '.summary.score' /tmp/codegate-assessment.json)"
 rating="$(jq -r '.rating' /tmp/codegate-assessment.json)"
 label="$(printf '%s %s' "$score" "$rating" | jq -sRr @uri)"
