@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/codewandler/editor"
@@ -28,39 +27,6 @@ type app struct {
 	err io.Writer
 }
 
-type assessmentReport struct {
-	Root        string                 `json:"root"`
-	Language    string                 `json:"language"`
-	Summary     assessmentSummary      `json:"summary"`
-	Scores      assessmentScores       `json:"scores"`
-	Validation  validationSummary      `json:"validation"`
-	TopUnits    []editor.UnitMetrics   `json:"top_units,omitempty"`
-	Suggestions []suggestionSummary    `json:"suggestions,omitempty"`
-	Diagnostics []editor.Diagnostic    `json:"diagnostics,omitempty"`
-	Metrics     map[string]interface{} `json:"metrics,omitempty"`
-}
-
-type assessmentSummary struct {
-	Packages        int `json:"packages"`
-	Symbols         int `json:"symbols"`
-	Imports         int `json:"imports"`
-	Suggestions     int `json:"suggestions"`
-	ExecutableFixes int `json:"executable_fixes"`
-}
-
-type assessmentScores struct {
-	Overall         int     `json:"overall"`
-	Maintainability int     `json:"maintainability"`
-	Pressure        float64 `json:"pressure"`
-}
-
-type validationSummary struct {
-	Passed         bool   `json:"passed"`
-	ResolutionMode string `json:"resolution_mode"`
-	Diagnostics    int    `json:"diagnostics"`
-	Files          int    `json:"files"`
-}
-
 type suggestionSummary struct {
 	ID         string                 `json:"id"`
 	Kind       editor.RefactorKind    `json:"kind"`
@@ -74,39 +40,15 @@ type suggestionSummary struct {
 	Raw        map[string]interface{} `json:"raw,omitempty"`
 }
 
-type lookupResult struct {
-	Query       lookupQuery             `json:"query"`
-	Target      editor.NavigationTarget `json:"target"`
-	Symbols     []editor.Symbol         `json:"symbols,omitempty"`
-	Locations   []editor.Location       `json:"locations,omitempty"`
-	Occurrences []editor.Occurrence     `json:"occurrences,omitempty"`
-	Callers     []editor.CallEdge       `json:"callers,omitempty"`
-	Callees     []editor.CallEdge       `json:"callees,omitempty"`
-	Diagnostics []editor.Diagnostic     `json:"diagnostics,omitempty"`
-	Ambiguous   bool                    `json:"ambiguous,omitempty"`
-	Complete    bool                    `json:"complete"`
-	Warnings    []string                `json:"warnings,omitempty"`
-}
-
-type lookupQuery struct {
-	Path           string `json:"path,omitempty"`
-	Offset         *int   `json:"offset,omitempty"`
-	Line           int    `json:"line,omitempty"`
-	Column         int    `json:"column,omitempty"`
-	Name           string `json:"name,omitempty"`
-	QualifiedName  string `json:"qualified_name,omitempty"`
-	Kind           string `json:"kind,omitempty"`
-	IncludeRefs    bool   `json:"include_refs,omitempty"`
-	IncludeCallers bool   `json:"include_callers,omitempty"`
-}
+type lookupQuery = editor.LookupQuery
 
 type cycleResult struct {
-	Assessment assessmentReport   `json:"assessment"`
-	Selected   *suggestionSummary `json:"selected,omitempty"`
-	Applied    bool               `json:"applied"`
-	Validation *validationSummary `json:"validation,omitempty"`
-	Diff       string             `json:"diff,omitempty"`
-	Message    string             `json:"message,omitempty"`
+	Assessment editor.AssessmentReport      `json:"assessment"`
+	Selected   *editor.AssessmentSuggestion `json:"selected,omitempty"`
+	Applied    bool                         `json:"applied"`
+	Validation *editor.ValidationSummary    `json:"validation,omitempty"`
+	Diff       string                       `json:"diff,omitempty"`
+	Message    string                       `json:"message,omitempty"`
 }
 
 func main() {
@@ -127,14 +69,15 @@ It exposes the intended public cycle:
 
   lookup -> assess -> suggest -> apply -> validate -> reassess
 
-The current implementation is backed by the existing editor Go APIs while the
-public codegate engine facade is still being designed.`),
+The current implementation uses the public engine facade so the CLI can serve
+as an agent skill and API proof at the same time.`),
 	}
 	cmd.PersistentFlags().StringVar(&a.cfg.root, "root", ".", "workspace root")
 	cmd.PersistentFlags().StringVar(&a.cfg.language, "language", "go", "language backend")
 	cmd.PersistentFlags().BoolVar(&a.cfg.includeTests, "tests", false, "include test files")
 	cmd.PersistentFlags().StringVar(&a.cfg.format, "format", "json", "output format: json")
 	cmd.AddCommand(
+		a.capabilitiesCommand(),
 		a.lookupCommand(),
 		a.assessCommand(),
 		a.suggestCommand(),
@@ -144,72 +87,38 @@ public codegate engine facade is still being designed.`),
 	return cmd
 }
 
+func (a *app) capabilitiesCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "capabilities",
+		Short: "List language backend capabilities",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, _, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return a.print(eng.Capabilities())
+		},
+	}
+	return cmd
+}
+
 func (a *app) lookupCommand() *cobra.Command {
 	var q lookupQuery
+	var kind string
 	cmd := &cobra.Command{
 		Use:   "lookup",
 		Short: "Resolve a symbol, source position, or structural target",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			ed, scope, err := a.editor()
+			eng, scope, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
 			}
-			scope.Path = q.Path
-			var out lookupResult
-			out.Query = q
-			if q.Path != "" && (q.Offset != nil || q.Line > 0 || q.Column > 0) {
-				nav, err := ed.Navigate(ctx, editor.PositionSelector{Path: q.Path, Offset: q.Offset, Line: q.Line, Column: q.Column}, editor.NavigationOptions{Scope: scope, FallbackEnclosing: true})
-				if err != nil {
-					return err
-				}
-				out.Target = nav.Target
-				out.Symbols = nav.Symbols
-				out.Locations = nav.Locations
-				out.Diagnostics = nav.Diagnostics
-				out.Complete = nav.Complete
-				out.Warnings = nav.Warnings
-				if len(nav.Symbols) > 0 {
-					out.Ambiguous = len(nav.Symbols) > 1
-				}
-			} else {
-				sel := editor.SymbolSelector{
-					Language:      editor.LanguageID(a.cfg.language),
-					Name:          q.Name,
-					QualifiedName: q.QualifiedName,
-					Kind:          editor.SymbolKind(q.Kind),
-					Path:          q.Path,
-					IncludeTests:  &a.cfg.includeTests,
-				}
-				symbols, err := ed.FindSymbols(ctx, sel)
-				if err != nil {
-					return err
-				}
-				out.Symbols = symbols
-				out.Ambiguous = len(symbols) > 1
-				out.Complete = false
-				for _, sym := range symbols {
-					out.Locations = append(out.Locations, sym.Location)
-				}
-				if q.IncludeRefs && len(symbols) > 0 {
-					refs, err := ed.References(ctx, editor.SymbolSelector{ID: symbols[0].ID, IncludeTests: &a.cfg.includeTests})
-					if err != nil {
-						return err
-					}
-					out.Occurrences = refs
-				}
-				if q.IncludeCallers && len(symbols) > 0 {
-					callers, err := ed.Callers(ctx, editor.SymbolSelector{ID: symbols[0].ID, IncludeTests: &a.cfg.includeTests})
-					if err != nil {
-						return err
-					}
-					callees, err := ed.Callees(ctx, editor.SymbolSelector{ID: symbols[0].ID, IncludeTests: &a.cfg.includeTests})
-					if err != nil {
-						return err
-					}
-					out.Callers = callers
-					out.Callees = callees
-				}
+			q.Scope = scope
+			q.Language = scope.Language
+			q.IncludeTests = &a.cfg.includeTests
+			out, err := eng.Lookup(cmd.Context(), q)
+			if err != nil {
+				return err
 			}
 			return a.print(out)
 		},
@@ -220,7 +129,7 @@ func (a *app) lookupCommand() *cobra.Command {
 	cmd.Flags().IntVar(&q.Column, "column", 0, "1-indexed byte column")
 	cmd.Flags().StringVar(&q.Name, "name", "", "symbol or structural name")
 	cmd.Flags().StringVar(&q.QualifiedName, "qualified-name", "", "qualified symbol name")
-	cmd.Flags().StringVar(&q.Kind, "kind", "", "symbol kind")
+	cmd.Flags().StringVar(&kind, "kind", "", "symbol kind")
 	cmd.Flags().BoolVar(&q.IncludeRefs, "refs", false, "include references for symbol lookup")
 	cmd.Flags().BoolVar(&q.IncludeCallers, "callers", false, "include callers/callees for symbol lookup")
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
@@ -231,6 +140,7 @@ func (a *app) lookupCommand() *cobra.Command {
 		if offset >= 0 {
 			q.Offset = &offset
 		}
+		q.Kind = editor.SymbolKind(kind)
 		if q.Path == "" && q.Name == "" && q.QualifiedName == "" {
 			return errors.New("lookup requires --path with a position or --name/--qualified-name")
 		}
@@ -263,11 +173,11 @@ func (a *app) suggestCommand() *cobra.Command {
 		Use:   "suggest",
 		Short: "List improvement suggestions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ed, scope, err := a.editor()
+			eng, scope, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
 			}
-			proposals, err := ed.SuggestRefactorings(cmd.Context(), editor.WithSuggestScope(scope))
+			proposals, err := eng.Suggest(cmd.Context(), editor.SuggestOptions{Scope: scope})
 			if err != nil {
 				return err
 			}
@@ -285,11 +195,11 @@ func (a *app) validateCommand() *cobra.Command {
 		Use:   "validate",
 		Short: "Run explicit validation checks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ed, scope, err := a.editor()
+			eng, scope, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
 			}
-			result, err := ed.Validate(cmd.Context(), editor.ValidationOptions{
+			result, err := eng.Validate(cmd.Context(), editor.ValidationOptions{
 				Scope: scope,
 				Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck},
 			})
@@ -314,7 +224,7 @@ func (a *app) cycleCommand() *cobra.Command {
 				return err
 			}
 			result := cycleResult{Assessment: assessment}
-			var selected *suggestionSummary
+			var selected *editor.AssessmentSuggestion
 			for i := range assessment.Suggestions {
 				if assessment.Suggestions[i].Operations > 0 {
 					next := assessment.Suggestions[i]
@@ -331,11 +241,11 @@ func (a *app) cycleCommand() *cobra.Command {
 				result.Message = "dry run: pass --apply-first to apply the first executable suggestion to an in-memory changeset"
 				return a.print(result)
 			}
-			ed, scope, err := a.editor()
+			eng, scope, err := a.engine(ctx)
 			if err != nil {
 				return err
 			}
-			proposals, err := ed.SuggestRefactorings(ctx, editor.WithSuggestScope(scope))
+			proposals, err := eng.Suggest(ctx, editor.SuggestOptions{Scope: scope})
 			if err != nil {
 				return err
 			}
@@ -349,7 +259,7 @@ func (a *app) cycleCommand() *cobra.Command {
 			if len(proposal.Operations) == 0 {
 				return fmt.Errorf("selected suggestion %s has no operations", selected.ID)
 			}
-			changes := ed.NewChangeSet()
+			changes := eng.NewChangeSet()
 			if err := changes.Apply(ctx, proposal.Operations...); err != nil {
 				return err
 			}
@@ -365,11 +275,12 @@ func (a *app) cycleCommand() *cobra.Command {
 				return err
 			}
 			result.Applied = true
-			result.Validation = &validationSummary{
+			result.Validation = &editor.ValidationSummary{
 				Passed:         validation.Passed,
 				ResolutionMode: validation.ResolutionMode,
 				Diagnostics:    len(validation.Diagnostics),
 				Files:          len(validation.AffectedPaths),
+				Complete:       validation.Complete,
 			}
 			result.Diff = diff
 			return a.print(result)
@@ -379,90 +290,23 @@ func (a *app) cycleCommand() *cobra.Command {
 	return cmd
 }
 
-func (a *app) editor() (*editor.Editor, editor.Scope, error) {
+func (a *app) engine(ctx context.Context) (editor.Engine, editor.Scope, error) {
 	if a.cfg.language != string(editor.Go) {
 		return nil, editor.Scope{}, fmt.Errorf("language %q is not wired yet; current skeleton supports go", a.cfg.language)
 	}
-	source := dirSource{fsys: os.DirFS(a.cfg.root)}
-	ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor.Go))
+	eng, err := editor.NewEngine().Roots(a.cfg.root).WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).Build(ctx)
 	if err != nil {
 		return nil, editor.Scope{}, err
 	}
-	return ed, editor.Scope{Language: editor.Go, IncludeTests: a.cfg.includeTests}, nil
+	return eng, editor.Scope{Language: editor.Go, IncludeTests: a.cfg.includeTests}, nil
 }
 
-func (a *app) assess(ctx context.Context, limit int) (assessmentReport, error) {
-	ed, scope, err := a.editor()
+func (a *app) assess(ctx context.Context, limit int) (editor.AssessmentReport, error) {
+	eng, scope, err := a.engine(ctx)
 	if err != nil {
-		return assessmentReport{}, err
+		return editor.AssessmentReport{}, err
 	}
-	packages, err := ed.Packages(ctx, scope)
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	symbols, err := ed.FindSymbols(ctx, editor.SymbolSelector{Language: editor.Go, IncludeTests: &a.cfg.includeTests})
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	imports, err := ed.Imports(ctx, scope)
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	metrics, err := ed.Metrics(ctx, scope)
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	validation, err := ed.Validate(ctx, editor.ValidationOptions{
-		Scope: scope,
-		Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck},
-	})
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	proposals, err := ed.SuggestRefactorings(ctx, editor.WithSuggestScope(scope))
-	if err != nil {
-		return assessmentReport{}, err
-	}
-	executable := 0
-	for _, proposal := range proposals {
-		if editor.HasOperations(proposal) {
-			executable++
-		}
-	}
-	topUnits := topUnits(metrics.Units, 8)
-	pressure := 0.0
-	if len(topUnits) > 0 {
-		pressure = topUnits[0].PressureScore
-	}
-	return assessmentReport{
-		Root:     a.cfg.root,
-		Language: a.cfg.language,
-		Summary: assessmentSummary{
-			Packages:        len(packages.Packages),
-			Symbols:         len(symbols),
-			Imports:         len(imports),
-			Suggestions:     len(proposals),
-			ExecutableFixes: executable,
-		},
-		Scores: assessmentScores{
-			Overall:         coarseScore(validation.Passed, len(proposals), pressure),
-			Maintainability: coarseScore(true, len(proposals), pressure),
-			Pressure:        pressure,
-		},
-		Validation: validationSummary{
-			Passed:         validation.Passed,
-			ResolutionMode: validation.ResolutionMode,
-			Diagnostics:    len(validation.Diagnostics),
-			Files:          len(validation.AffectedPaths),
-		},
-		TopUnits:    topUnits,
-		Suggestions: summarizeSuggestions(proposals, false, limit),
-		Diagnostics: append(packages.Diagnostics, metrics.Diagnostics...),
-		Metrics: map[string]interface{}{
-			"score_model": "skeleton",
-			"note":        "assessment scoring will move to codegate.Assess once the public engine API lands",
-		},
-	}, nil
+	return eng.Assess(ctx, editor.AssessmentOptions{Scope: scope, SuggestionLimit: limit})
 }
 
 func (a *app) print(v interface{}) error {
@@ -537,40 +381,4 @@ func summarizeSuggestions(proposals []editor.Proposal, executableOnly bool, limi
 		}
 	}
 	return out
-}
-
-func topUnits(units []editor.UnitMetrics, limit int) []editor.UnitMetrics {
-	units = append([]editor.UnitMetrics(nil), units...)
-	sort.Slice(units, func(i, j int) bool {
-		if units[i].PressureScore == units[j].PressureScore {
-			return units[i].UnitID < units[j].UnitID
-		}
-		return units[i].PressureScore > units[j].PressureScore
-	})
-	if limit > 0 && len(units) > limit {
-		return units[:limit]
-	}
-	return units
-}
-
-func coarseScore(validationPassed bool, suggestions int, pressure float64) int {
-	if !validationPassed {
-		return 40
-	}
-	score := 100 - minInt(40, suggestions/5) - minInt(20, int(pressure/100))
-	return maxInt(50, score)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

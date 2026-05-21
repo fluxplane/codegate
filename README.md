@@ -1,6 +1,6 @@
 # editor
 
-`editor` is a small Go library for source-aware navigation and controlled code edits.
+`editor` is a small Go library for source-aware navigation, assessment, and controlled code edits. It is moving toward the publishable `codegate` shape: an agent-oriented engine that can look up code facts, assess quality, suggest fixes, apply explicit operations, validate pending changes, and reassess.
 
 The module is:
 
@@ -14,6 +14,9 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 
 - `fs.FS`-backed workspaces with in-memory overlay commits.
 - Direct source/workspace integration via `editor.WithSource`.
+- Public engine facade via `editor.NewEngine()` for agent loops.
+- Agent-readable `Lookup`, `Assess`, `Suggest`, `Validate`, and capability reporting APIs.
+- Cobra CLI skeleton in `cmd/codegate` for JSON-first agent/LLM skill usage.
 - Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
 - Pluggable language backend contract via `editor.Backend`.
@@ -115,6 +118,29 @@ func hello() string {
 }
 ```
 
+## Engine Example
+
+```go
+engine, err := editor.NewEngine().
+	Roots(".").
+	WithSource(source).
+	Build(ctx)
+if err != nil {
+	panic(err)
+}
+
+report, err := engine.Assess(ctx, editor.AssessmentOptions{
+	Scope: editor.Scope{Language: editor.Go},
+})
+if err != nil {
+	panic(err)
+}
+
+_ = report.Summary.Score
+```
+
+The lower-level `editor.New` API remains available for direct source editing. The engine facade is the preferred public shape for agent workflows.
+
 ## Agentruntime Integration
 
 Use `adapter/agentruntime` to bridge an agentruntime workspace without adding an agentruntime dependency to core:
@@ -198,13 +224,13 @@ These limitations are intentional in core. Toolchain execution and disk persiste
 
 Upcoming work:
 
-1. Replace the existing agentruntime Go language plugin internals with calls into this library.
-2. Add an explicit OS filesystem adapter for durable commits outside core.
-3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
-4. Improve dynamic call limitations and type-aware selector classification.
-5. Add validation adapters for explicit build/test workflows.
-6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
-7. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
+1. Replace the existing agentruntime Go language plugin internals with calls into the engine facade.
+2. Expand assessment scoring with architecture gates, boundary findings, and violation reports.
+3. Add a Markdown backend proof, likely goldmark-backed, for structural quality checks outside code.
+4. Add a tree-sitter-backed backend proof for another code language.
+5. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
+6. Add validation adapters for explicit build/test workflows.
+7. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
 
 ## Non-goals
 

@@ -57,6 +57,25 @@ func Target() string {
 	}
 }
 
+func TestCodegateCapabilitiesCommand(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", "package demo\n")
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "capabilities"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"capability": "lookup"`) {
+		t.Fatalf("unexpected capabilities output:\n%s", got)
+	}
+}
+
 func writeFile(t *testing.T, root, name, content string) {
 	t.Helper()
 	p := filepath.Join(root, name)

@@ -16,11 +16,38 @@ type BackendInfo struct {
 }
 
 type BackendSpec struct {
-	Language       LanguageID
-	Name           string
-	FileExtensions []string
-	Capabilities   []string
-	ResolutionMode string
+	Language       LanguageID          `json:"language"`
+	Name           string              `json:"name"`
+	FileExtensions []string            `json:"file_extensions"`
+	Capabilities   []CapabilitySupport `json:"capabilities"`
+	ResolutionMode string              `json:"resolution_mode"`
+}
+
+type Capability string
+
+const (
+	CapabilityLookup         Capability = "lookup"
+	CapabilityStaticAnalysis Capability = "static_analysis"
+	CapabilityQuality        Capability = "quality"
+	CapabilityEditing        Capability = "editing"
+	CapabilityRefactoring    Capability = "refactoring"
+	CapabilityValidation     Capability = "validation"
+	CapabilityReporting      Capability = "reporting"
+)
+
+type CapabilityLevel string
+
+const (
+	CapabilityNone         CapabilityLevel = "none"
+	CapabilityBasic        CapabilityLevel = "basic"
+	CapabilityAdvanced     CapabilityLevel = "advanced"
+	CapabilityExperimental CapabilityLevel = "experimental"
+)
+
+type CapabilitySupport struct {
+	Capability Capability      `json:"capability"`
+	Level      CapabilityLevel `json:"level"`
+	Notes      string          `json:"notes,omitempty"`
 }
 
 type Snapshot interface {

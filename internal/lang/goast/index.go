@@ -25,7 +25,15 @@ func (b GoBackend) Spec() BackendSpec {
 		Language:       Go,
 		Name:           "goast",
 		FileExtensions: []string{".go"},
-		Capabilities:   []string{"index", "edit", "format", "suggest"},
+		Capabilities: []CapabilitySupport{
+			{Capability: CapabilityLookup, Level: CapabilityAdvanced, Notes: "AST-backed symbol, position, reference, and call lookup for Go source."},
+			{Capability: CapabilityStaticAnalysis, Level: CapabilityAdvanced, Notes: "Indexes packages, symbols, imports, references, calls, and implementation edges."},
+			{Capability: CapabilityQuality, Level: CapabilityBasic, Notes: "Computes pressure metrics and advisory refactoring proposals."},
+			{Capability: CapabilityEditing, Level: CapabilityAdvanced, Notes: "Compiles structured Go edit operations into formatted source changes."},
+			{Capability: CapabilityRefactoring, Level: CapabilityBasic, Notes: "Supports executable low-risk operations plus advisory higher-level proposals."},
+			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Runs parse checks and best-effort type checking for local module code."},
+			{Capability: CapabilityReporting, Level: CapabilityBasic, Notes: "Feeds package, metric, diagnostic, and proposal data into assessment reports."},
+		},
 		ResolutionMode: "ast",
 	}
 }

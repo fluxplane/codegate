@@ -3,11 +3,12 @@ package editor
 import "github.com/codewandler/editor/internal/core"
 
 type (
-	RefactorKind  = core.RefactorKind
-	Confidence    = core.Confidence
-	RiskLevel     = core.RiskLevel
-	Proposal      = core.Proposal
-	SuggestOption = core.SuggestOption
+	RefactorKind   = core.RefactorKind
+	Confidence     = core.Confidence
+	RiskLevel      = core.RiskLevel
+	Proposal       = core.Proposal
+	SuggestOption  = core.SuggestOption
+	SuggestOptions = core.SuggestOptions
 )
 
 const (

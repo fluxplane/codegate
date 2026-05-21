@@ -2511,7 +2511,7 @@ func (fakeBackend) Spec() BackendSpec {
 		Language:       LanguageID("fake"),
 		Name:           "fake",
 		FileExtensions: []string{".fake"},
-		Capabilities:   []string{"index"},
+		Capabilities:   []CapabilitySupport{{Capability: CapabilityStaticAnalysis, Level: CapabilityBasic}},
 		ResolutionMode: "fake",
 	}
 }
@@ -2567,7 +2567,7 @@ func (referenceBackend) Spec() BackendSpec {
 		Language:       LanguageID("ref"),
 		Name:           "ref",
 		FileExtensions: []string{".ref"},
-		Capabilities:   []string{"index"},
+		Capabilities:   []CapabilitySupport{{Capability: CapabilityStaticAnalysis, Level: CapabilityBasic}},
 		ResolutionMode: "ref",
 	}
 }

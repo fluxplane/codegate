@@ -4,6 +4,9 @@ import "github.com/codewandler/editor/internal/core"
 
 type (
 	BackendSpec             = core.BackendSpec
+	Capability              = core.Capability
+	CapabilityLevel         = core.CapabilityLevel
+	CapabilitySupport       = core.CapabilitySupport
 	Snapshot                = core.Snapshot
 	Index                   = core.Index
 	Document                = core.Document
@@ -69,6 +72,23 @@ type (
 )
 
 const Go = core.Go
+
+const (
+	CapabilityLookup         = core.CapabilityLookup
+	CapabilityStaticAnalysis = core.CapabilityStaticAnalysis
+	CapabilityQuality        = core.CapabilityQuality
+	CapabilityEditing        = core.CapabilityEditing
+	CapabilityRefactoring    = core.CapabilityRefactoring
+	CapabilityValidation     = core.CapabilityValidation
+	CapabilityReporting      = core.CapabilityReporting
+)
+
+const (
+	CapabilityNone         = core.CapabilityNone
+	CapabilityBasic        = core.CapabilityBasic
+	CapabilityAdvanced     = core.CapabilityAdvanced
+	CapabilityExperimental = core.CapabilityExperimental
+)
 
 const (
 	ValidationParse     = core.ValidationParse
