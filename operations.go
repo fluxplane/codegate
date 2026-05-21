@@ -70,3 +70,20 @@ const (
 	OpExtractGoFunc   = core.OpExtractGoFunc
 	OpExtractGoMethod = core.OpExtractGoMethod
 )
+
+// HasOperations reports whether a refactor proposal carries concrete edits that
+// can be passed to ChangeSet.Apply.
+func HasOperations(proposal Proposal) bool {
+	return len(proposal.Operations) > 0
+}
+
+// ExecutableProposals filters advisory-only proposals out of a suggestion list.
+func ExecutableProposals(proposals []Proposal) []Proposal {
+	out := make([]Proposal, 0, len(proposals))
+	for _, proposal := range proposals {
+		if HasOperations(proposal) {
+			out = append(out, proposal)
+		}
+	}
+	return out
+}

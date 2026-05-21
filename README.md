@@ -46,6 +46,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - large parameter lists
   - boolean flag parameters
   - high fan-in packages
+  - executable operation payloads for safe suggestions; advisory evidence for suggestions that need user intent
 
 ## Position coordinates
 
@@ -173,6 +174,7 @@ Supported today:
 - deterministic refactoring operations for Go signatures, parameters, receivers, struct fields, interface methods, and range-based function/method extraction
 - optional import reconciliation when moving symbols between Go files
 - package and symbol metrics plus AST-derived refactoring proposals
+- executable refactor proposals for unused private symbols; advisory proposals for larger design-dependent refactors
 - agentruntime-style source integration through context-aware reads and workspace walks
 
 Current limitations:
@@ -194,8 +196,9 @@ Upcoming work:
 3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 4. Improve field/write/read occurrence classification and dynamic call limitations.
 5. Expand refactoring validation for shadowing, field selector type checks, method dispatch, and complex call expressions.
-6. Add validation adapters for parse/typecheck/build/test workflows.
-7. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
+6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
+7. Add validation adapters for parse/typecheck/build/test workflows.
+8. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
 
 ## Non-goals
 

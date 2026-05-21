@@ -16,7 +16,11 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 		return nil, err
 	}
 	var proposals []Proposal
-	proposals = append(proposals, suggestUnusedPrivate(idx)...)
+	unused, err := suggestUnusedPrivate(ctx, snapshot, idx)
+	if err != nil {
+		return nil, err
+	}
+	proposals = append(proposals, unused...)
 	proposals = append(proposals, suggestLargeFunctions(idx)...)
 	proposals = append(proposals, suggestLargeParameterLists(idx)...)
 	proposals = append(proposals, suggestBooleanFlags(idx)...)
@@ -28,7 +32,7 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 	return proposals, nil
 }
 
-func suggestUnusedPrivate(idx *index) []Proposal {
+func suggestUnusedPrivate(ctx context.Context, snapshot Snapshot, idx *index) ([]Proposal, error) {
 	used := map[SymbolID]bool{}
 	for _, occ := range idx.occurrences {
 		if occ.Kind != OccurrenceReference {
@@ -44,6 +48,10 @@ func suggestUnusedPrivate(idx *index) []Proposal {
 		if strings.HasPrefix(sym.Name, "_") || isGoEntrypoint(sym) {
 			continue
 		}
+		hash, err := sourceHash(ctx, snapshot, sym)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, Proposal{
 			Kind:       RefactorDeleteSymbol,
 			Title:      "Delete unused private symbol",
@@ -52,11 +60,11 @@ func suggestUnusedPrivate(idx *index) []Proposal {
 			Risk:       RiskLow,
 			Targets:    []Symbol{sym},
 			Evidence:   []Evidence{{Kind: "unused_private_symbol", Message: "No references were found by the AST backend.", Location: sym.Location}},
-			Operations: []Operation{DeleteSymbol{Target: SymbolSelector{ID: sym.ID}}},
+			Operations: []Operation{DeleteSymbol{Target: SymbolSelector{ID: sym.ID}, ExpectedHash: hash}},
 			Metrics:    map[string]float64{"references": 0},
 		})
 	}
-	return out
+	return out, nil
 }
 
 func isGoEntrypoint(sym Symbol) bool {
@@ -86,8 +94,11 @@ func suggestLargeFunctions(idx *index) []Proposal {
 			Confidence: MediumConfidence,
 			Risk:       RiskMedium,
 			Targets:    []Symbol{sym},
-			Evidence:   []Evidence{{Kind: "large_function", Message: "Function length exceeds 40 lines.", Location: sym.Location, Metrics: map[string]float64{"lines": float64(lines)}}},
-			Metrics:    map[string]float64{"lines": float64(lines)},
+			Evidence: []Evidence{
+				{Kind: "large_function", Message: "Function length exceeds 40 lines.", Location: sym.Location, Metrics: map[string]float64{"lines": float64(lines)}},
+				advisoryNoOperationEvidence("Extraction range and replacement call cannot be inferred safely by the AST backend."),
+			},
+			Metrics: map[string]float64{"lines": float64(lines)},
 		})
 	}
 	return out
@@ -110,8 +121,11 @@ func suggestLargeParameterLists(idx *index) []Proposal {
 			Confidence: MediumConfidence,
 			Risk:       RiskMedium,
 			Targets:    []Symbol{sym},
-			Evidence:   []Evidence{{Kind: "large_parameter_list", Message: "Parameter count is at least 5.", Location: sym.Location, Metrics: map[string]float64{"parameters": float64(n)}}},
-			Metrics:    map[string]float64{"parameters": float64(n)},
+			Evidence: []Evidence{
+				{Kind: "large_parameter_list", Message: "Parameter count is at least 5.", Location: sym.Location, Metrics: map[string]float64{"parameters": float64(n)}},
+				advisoryNoOperationEvidence("Introducing a parameter object requires user-chosen type and field names."),
+			},
+			Metrics: map[string]float64{"parameters": float64(n)},
 		})
 	}
 	return out
@@ -133,7 +147,10 @@ func suggestBooleanFlags(idx *index) []Proposal {
 			Confidence: MediumConfidence,
 			Risk:       RiskMedium,
 			Targets:    []Symbol{sym},
-			Evidence:   []Evidence{{Kind: "boolean_flag_parameter", Message: "Function signature contains a bool parameter.", Location: sym.Location}},
+			Evidence: []Evidence{
+				{Kind: "boolean_flag_parameter", Message: "Function signature contains a bool parameter.", Location: sym.Location},
+				advisoryNoOperationEvidence("Replacing a boolean flag requires semantic intent for the alternative API."),
+			},
 		})
 	}
 	return out
@@ -151,7 +168,7 @@ func suggestHighFanIn(idx *index) []Proposal {
 			Summary:    fmt.Sprintf("Unit %q has high inbound pressure.", metric.UnitID),
 			Confidence: LowConfidence,
 			Risk:       RiskHigh,
-			Evidence:   metric.Evidence,
+			Evidence:   advisoryEvidence(metric.Evidence, "Package split operations require user-selected package boundaries."),
 			Metrics: map[string]float64{
 				"direct_fan_in": float64(metric.DirectFanIn),
 				"call_fan_in":   float64(metric.CallFanIn),
@@ -180,7 +197,7 @@ func suggestHighPressureSymbols(idx *index) []Proposal {
 			Confidence: LowConfidence,
 			Risk:       RiskMedium,
 			Targets:    []Symbol{sym},
-			Evidence:   metric.Evidence,
+			Evidence:   advisoryEvidence(metric.Evidence, "High-pressure symbols require user-selected refactoring strategy."),
 			Metrics: map[string]float64{
 				"references":  float64(metric.ReferenceCount),
 				"call_fan_in": float64(metric.CallFanIn),
@@ -189,6 +206,27 @@ func suggestHighPressureSymbols(idx *index) []Proposal {
 		})
 	}
 	return out
+}
+
+func sourceHash(ctx context.Context, snapshot Snapshot, sym Symbol) (string, error) {
+	src, err := snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return "", err
+	}
+	start, end := sym.Location.Range.Start.Offset, sym.Location.Range.End.Offset
+	if start < 0 || end > len(src) || start > end {
+		return "", fmt.Errorf("editor: invalid symbol range for %s", sym.QualifiedName)
+	}
+	return hashBytes(src[start:end]), nil
+}
+
+func advisoryNoOperationEvidence(message string) Evidence {
+	return Evidence{Kind: "advisory_no_operation", Message: message}
+}
+
+func advisoryEvidence(existing []Evidence, message string) []Evidence {
+	out := append([]Evidence(nil), existing...)
+	return append(out, advisoryNoOperationEvidence(message))
 }
 
 func computeSymbolMetrics(idx *index) []SymbolMetrics {

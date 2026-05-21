@@ -352,6 +352,90 @@ func unusedHelper() {}
 	}
 }
 
+func TestExecutableRefactorProposals(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Render(name string, compact bool, a int, b int, c int) {}
+
+func unusedHelper() {}
+`,
+	})
+	proposals, err := ed.SuggestRefactorings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable := ExecutableProposals(proposals)
+	if len(executable) == 0 {
+		t.Fatalf("expected executable proposals: %#v", proposals)
+	}
+	for _, proposal := range executable {
+		if !HasOperations(proposal) {
+			t.Fatalf("executable proposal without operations: %#v", proposal)
+		}
+	}
+	var deleteUnused Proposal
+	for _, proposal := range executable {
+		if proposal.Kind != RefactorDeleteSymbol {
+			continue
+		}
+		for _, target := range proposal.Targets {
+			if target.Name == "unusedHelper" {
+				deleteUnused = proposal
+				break
+			}
+		}
+	}
+	if len(deleteUnused.Operations) != 1 {
+		t.Fatalf("expected delete proposal for unusedHelper with one operation: %#v", executable)
+	}
+	deleteOp, ok := deleteUnused.Operations[0].(DeleteSymbol)
+	if !ok || deleteOp.ExpectedHash == "" {
+		t.Fatalf("expected hash-guarded DeleteSymbol operation, got %#v", deleteUnused.Operations[0])
+	}
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, deleteUnused.Operations...); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if strings.Contains(after, "unusedHelper") {
+		t.Fatalf("proposal operation did not delete unusedHelper:\n%s", after)
+	}
+}
+
+func TestAdvisoryRefactorProposalsHaveNoOperations(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Render(name string, compact bool, a int, b int, c int) {}
+`,
+	})
+	proposals, err := ed.SuggestRefactorings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, proposal := range proposals {
+		switch proposal.Kind {
+		case RefactorIntroduceConfig, RefactorReplaceFlagArgument:
+			if HasOperations(proposal) {
+				t.Fatalf("advisory proposal should not include operations: %#v", proposal)
+			}
+			found := false
+			for _, evidence := range proposal.Evidence {
+				if evidence.Kind == "advisory_no_operation" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("advisory proposal missing advisory evidence: %#v", proposal)
+			}
+		}
+	}
+}
+
 func TestSuggestRefactoringsSkipsGoEntrypoints(t *testing.T) {
 	ctx := context.Background()
 	ed := newTestEditor(t, map[string]string{

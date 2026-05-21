@@ -176,7 +176,7 @@ func printProposals(proposals []editor.Proposal, limit int) {
 	}
 	fmt.Println()
 	for _, proposal := range proposals[:limit] {
-		fmt.Printf("  %s %s risk=%s confidence=%s\n", proposal.Kind, proposal.Title, proposal.Risk, proposal.Confidence)
+		fmt.Printf("  %s %s risk=%s confidence=%s ops=%d\n", proposal.Kind, proposal.Title, proposal.Risk, proposal.Confidence, len(proposal.Operations))
 		if proposal.Summary != "" {
 			fmt.Printf("    %s\n", proposal.Summary)
 		}
