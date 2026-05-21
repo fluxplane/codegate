@@ -150,6 +150,8 @@ The same policy can be passed to the CLI as JSON:
 }
 ```
 
+See [`examples/agentruntime-architecture.rules.json`](examples/agentruntime-architecture.rules.json) for a larger policy modeled after a layered agent runtime. It is an example of consumer-defined layer names and rules, not a built-in codegate architecture.
+
 ## Markdown Support
 
 Markdown is supported through a structural backend:
@@ -172,10 +174,13 @@ go run ./cmd/codegate --root . --language go capabilities
 go run ./cmd/codegate --root . --language go lookup --name Target --kind function
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
+go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
 go run ./cmd/codegate --root . --language go suggest --executable
 go run ./cmd/codegate --root . --language go cycle
 go run ./cmd/codegate --root . --language markdown assess --gate maintainability
 ```
+
+`assess --fail-on` prints the normal JSON report first, then exits non-zero if a selected category has an unallowed violation. Supported categories are `boundary`, `test-boundary`, `effects`, `unknown`, and `all`.
 
 Use `cycle --apply-first` only when you want the first executable suggestion applied to an in-memory change set and returned as a diff.
 
@@ -254,7 +259,7 @@ Built-in backends:
 - Markdown support is structural and read-only.
 - CLI output is JSON-only.
 - External validation adapters for build/test workflows are not implemented yet.
-- Architecture rules are import-boundary focused; richer layer models and package roles are still upcoming.
+- Architecture policies are currently Go-only and AST-backed; tree-sitter-backed policy support for other languages is still upcoming.
 
 ## Release Readiness
 
@@ -263,7 +268,7 @@ Before tagging, run the checklist in [`RELEASE.md`](RELEASE.md). The normal test
 ## Roadmap
 
 1. Replace the existing agentruntime Go language plugin internals with calls into the engine facade.
-2. Deepen Go architecture rules with package roles, layer models, and stronger violation classification.
+2. Add reusable architecture policy examples and adapters for common project shapes.
 3. Add a tree-sitter-backed backend proof for another code language such as Java or Groovy.
 4. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 5. Add validation adapters for explicit build/test workflows.

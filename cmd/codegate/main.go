@@ -63,8 +63,9 @@ func main() {
 
 func (a *app) rootCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "codegate",
-		Short: "Agent-oriented code analysis and improvement loop",
+		Use:          "codegate",
+		Short:        "Agent-oriented code analysis and improvement loop",
+		SilenceUsage: true,
 		Long: strings.TrimSpace(`codegate is a CLI skeleton for agent workflows.
 
 It exposes the intended public cycle:
@@ -155,6 +156,7 @@ func (a *app) assessCommand() *cobra.Command {
 	var limit int
 	var gates []string
 	var rulesPath string
+	var failOn []string
 	cmd := &cobra.Command{
 		Use:   "assess",
 		Short: "Create an agent-readable quality assessment",
@@ -171,12 +173,23 @@ func (a *app) assessCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.print(report)
+			if err := a.print(report); err != nil {
+				return err
+			}
+			categories, err := parseAssessmentFailureCategories(failOn)
+			if err != nil {
+				return err
+			}
+			if assessmentHasFailures(report, categories, rules) {
+				return fmt.Errorf("assessment failed selected gates: %s", strings.Join(categories, ","))
+			}
+			return nil
 		},
 	}
 	cmd.Flags().IntVar(&limit, "suggestions", 10, "maximum suggestions to include")
 	cmd.Flags().StringSliceVar(&gates, "gate", []string{"all"}, "assessment gate: architecture, maintainability, safety, coverage, or all")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "architecture rules JSON file")
+	cmd.Flags().StringSliceVar(&failOn, "fail-on", nil, "comma-separated failure categories: boundary, test-boundary, effects, unknown, or all")
 	return cmd
 }
 
@@ -375,6 +388,95 @@ func parseAssessmentGates(values []string) ([]codegate.AssessmentGate, error) {
 		return []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil
 	}
 	return out, nil
+}
+
+func parseAssessmentFailureCategories(values []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if part == "all" {
+				for _, category := range []string{"boundary", "test-boundary", "effects", "unknown"} {
+					if !seen[category] {
+						seen[category] = true
+						out = append(out, category)
+					}
+				}
+				continue
+			}
+			switch part {
+			case "boundary", "test-boundary", "effects", "unknown":
+				if !seen[part] {
+					seen[part] = true
+					out = append(out, part)
+				}
+			default:
+				return nil, fmt.Errorf("unsupported failure category %q", part)
+			}
+		}
+	}
+	return out, nil
+}
+
+func assessmentHasFailures(report codegate.AssessmentReport, categories []string, rules *codegate.ArchitectureRules) bool {
+	if len(categories) == 0 {
+		return false
+	}
+	for _, violation := range report.Violations {
+		if violation.Severity != "error" {
+			continue
+		}
+		for _, category := range categories {
+			if violationMatchesFailureCategory(violation, category, rules) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func violationMatchesFailureCategory(violation codegate.Violation, category string, rules *codegate.ArchitectureRules) bool {
+	switch category {
+	case "boundary":
+		return violation.Kind == "architecture_boundary_violation" || violation.Kind == "architecture_denied_import"
+	case "test-boundary":
+		return violation.Kind == "architecture_test_boundary_violation" || violation.Kind == "architecture_test_boundary_import"
+	case "effects":
+		return isArchitectureEffectViolation(violation.Kind, rules)
+	case "unknown":
+		return violation.Kind == "architecture_unknown_package"
+	default:
+		return false
+	}
+}
+
+func isArchitectureEffectViolation(kind string, rules *codegate.ArchitectureRules) bool {
+	if strings.HasPrefix(kind, "architecture_effect_") {
+		return true
+	}
+	if rules == nil {
+		return false
+	}
+	for _, rule := range rules.Effects {
+		if kind == architectureEffectKind(rule.Name, "architecture_effect_import") || kind == architectureEffectKind(rule.Name, "architecture_effect_call") {
+			return true
+		}
+	}
+	return false
+}
+
+func architectureEffectKind(name, fallback string) string {
+	if name == "" {
+		return fallback
+	}
+	if strings.HasPrefix(name, "architecture_") {
+		return name
+	}
+	return "architecture_" + name
 }
 
 func loadArchitectureRules(path string) (*codegate.ArchitectureRules, error) {
