@@ -1,5 +1,60 @@
 # Changelog
 
+## v1.1.0 - 2026-05-22
+
+### Highlights
+
+- Added a Claude Code plugin bundle under `plugins/codegate` with one skill,
+  one command, and one reviewer agent for codegate-driven assessment workflows.
+- Added README getting-started instructions for installing the CLI with
+  `go install` and running installed `codegate` commands directly.
+- Documented Claude plugin loading, validation, and maintenance rules for
+  direct `--plugin-dir` use from a checkout.
+
+### Added
+
+- Claude Code skill `codegate:codegate-workflow`.
+- Claude Code command `/codegate:assess`.
+- Claude Code agent `codegate:reviewer`.
+- Agent maintenance instructions for keeping the plugin self-contained and
+  avoiding an accidental root marketplace manifest.
+
+### Changed
+
+- README CLI examples now use the installed `codegate` binary instead of
+  `go run ./cmd/codegate`.
+
+### Fixed
+
+- None.
+
+### Breaking Changes
+
+- None.
+
+### Upgrade Notes
+
+- Existing Go API and CLI callers do not need code changes.
+- Claude Code users can load the plugin from a checkout with
+  `claude --plugin-dir ./plugins/codegate`.
+- Persistent Claude Code plugin installs still require a marketplace in the
+  current Claude CLI; this release intentionally ships the direct plugin bundle
+  without a root marketplace manifest.
+
+### Validation
+
+- `go test ./...`
+- `git diff --check`
+- `claude plugin validate ./plugins/codegate`
+- `claude --plugin-dir ./plugins/codegate agents`
+- `go run ./cmd/codegate --root . --language go capabilities`
+- `go run ./cmd/codegate --root . --language markdown assess --gate all`
+- `go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3`
+- `go run ./cmd/codegate --root . --language go assess --gate all --view full --suggestions 3`
+- `go run ./cmd/codegate --root . --language go assess --gate all --summary-only`
+- `go run ./cmd/codegate --root . --language go --format html assess --gate all > /tmp/codegate-release-report.html`
+- `go run ./cmd/codegate --root . --language go assess --gate architecture --rules examples/agentruntime-architecture.rules.json --summary-only`
+
 ## v1.0.0 - 2026-05-22
 
 ### Highlights
