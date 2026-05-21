@@ -269,8 +269,14 @@ const (
 )
 
 type ArchitectureRules struct {
-	Imports     []ArchitectureImportRule `json:"imports,omitempty"`
-	TestImports []ArchitectureImportRule `json:"test_imports,omitempty"`
+	ModulePath   string                       `json:"module_path,omitempty"`
+	Imports      []ArchitectureImportRule     `json:"imports,omitempty"`
+	TestImports  []ArchitectureImportRule     `json:"test_imports,omitempty"`
+	Layers       []ArchitectureLayer          `json:"layers,omitempty"`
+	Dependencies []ArchitectureDependencyRule `json:"dependencies,omitempty"`
+	Effects      []ArchitectureEffectRule     `json:"effects,omitempty"`
+	Coupling     ArchitectureCouplingRules    `json:"coupling,omitempty"`
+	Exceptions   []ArchitectureException      `json:"exceptions,omitempty"`
 }
 
 type ArchitectureImportRule struct {
@@ -278,6 +284,60 @@ type ArchitectureImportRule struct {
 	To     string                 `json:"to,omitempty"`
 	Action ArchitectureRuleAction `json:"action,omitempty"`
 	Reason string                 `json:"reason,omitempty"`
+}
+
+type ArchitectureLayer struct {
+	Name     string   `json:"name"`
+	Prefixes []string `json:"prefixes,omitempty"`
+}
+
+type ArchitectureDependencyRule struct {
+	FromLayer string                 `json:"from_layer"`
+	ToLayer   string                 `json:"to_layer"`
+	Action    ArchitectureRuleAction `json:"action,omitempty"`
+	Reason    string                 `json:"reason,omitempty"`
+}
+
+type ArchitectureEffectRule struct {
+	Name     string                 `json:"name,omitempty"`
+	Scope    ArchitectureScope      `json:"scope,omitempty"`
+	Imports  []string               `json:"imports,omitempty"`
+	Calls    []ArchitectureCallRule `json:"calls,omitempty"`
+	Action   ArchitectureRuleAction `json:"action,omitempty"`
+	Severity string                 `json:"severity,omitempty"`
+	Reason   string                 `json:"reason,omitempty"`
+}
+
+type ArchitectureScope struct {
+	Layers   []string `json:"layers,omitempty"`
+	Packages []string `json:"packages,omitempty"`
+	Paths    []string `json:"paths,omitempty"`
+}
+
+type ArchitectureCallRule struct {
+	Import string `json:"import"`
+	Symbol string `json:"symbol"`
+}
+
+type ArchitectureCouplingRules struct {
+	FanOutThreshold int                       `json:"fan_out_threshold,omitempty"`
+	Layers          []string                  `json:"layers,omitempty"`
+	ReviewedFanOut  []ArchitecturePackageNote `json:"reviewed_fan_out,omitempty"`
+}
+
+type ArchitecturePackageNote struct {
+	Package string `json:"package"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+type ArchitectureException struct {
+	Kind      string `json:"kind,omitempty"`
+	Package   string `json:"package,omitempty"`
+	Import    string `json:"import,omitempty"`
+	Symbol    string `json:"symbol,omitempty"`
+	FromLayer string `json:"from_layer,omitempty"`
+	ToLayer   string `json:"to_layer,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type AssessmentReport struct {

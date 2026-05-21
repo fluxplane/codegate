@@ -89,18 +89,28 @@ Reports include scores, findings, violations, diagnostics, top units, and sugges
 
 ## Architecture Rules
 
-Go assessment can take explicit import-boundary rules. Rules are prefix matched against the importing unit, package directory, or source path and the imported path. More specific rules win, so a narrow `allow` can override a broader `deny`.
+Go assessment can take explicit architecture rules. At the simplest level, rules are prefix matched against the importing unit, package directory, or source path and the imported path. More specific rules win, so a narrow `allow` can override a broader `deny`.
+
+For larger projects, consumers define their own layers, allowed dependency directions, side-effect policies, coupling thresholds, and reasoned exceptions. `codegate` does not bake in concepts such as domain, adapter, runtime, or plugin; those names belong to the consuming project.
 
 ```go
 report, err := engine.Assess(ctx, codegate.AssessmentOptions{
 	Scope: codegate.Scope{Language: codegate.Go},
 	Gates: []codegate.AssessmentGate{codegate.AssessmentGateArchitecture},
 	Architecture: &codegate.ArchitectureRules{
-		Imports: []codegate.ArchitectureImportRule{{
-			From:   "domain",
-			To:     "example.com/project/infra",
-			Action: codegate.ArchitectureRuleDeny,
-			Reason: "domain should not depend on infra",
+		Layers: []codegate.ArchitectureLayer{
+			{Name: "domain", Prefixes: []string{"domain"}},
+			{Name: "infra", Prefixes: []string{"infra"}},
+		},
+		Dependencies: []codegate.ArchitectureDependencyRule{
+			{FromLayer: "infra", ToLayer: "domain"},
+			{FromLayer: "domain", ToLayer: "domain"},
+		},
+		Effects: []codegate.ArchitectureEffectRule{{
+			Name:    "host_io",
+			Scope:   codegate.ArchitectureScope{Layers: []string{"domain"}},
+			Imports: []string{"os", "net/http"},
+			Reason:  "domain code should not access host IO directly",
 		}},
 	},
 })
@@ -110,22 +120,33 @@ The same policy can be passed to the CLI as JSON:
 
 ```json
 {
-  "imports": [
+  "layers": [
+    {"name": "domain", "prefixes": ["domain"]},
+    {"name": "infra", "prefixes": ["infra"]},
+    {"name": "app", "prefixes": ["app"]}
+  ],
+  "dependencies": [
+    {"from_layer": "domain", "to_layer": "domain"},
+    {"from_layer": "app", "to_layer": "domain"},
+    {"from_layer": "app", "to_layer": "infra"},
+    {"from_layer": "infra", "to_layer": "domain"}
+  ],
+  "effects": [
     {
-      "from": "domain",
-      "to": "example.com/project/infra",
-      "action": "deny",
-      "reason": "domain should not depend on infra"
+      "name": "host_io",
+      "scope": {"layers": ["domain"]},
+      "imports": ["os", "os/exec", "net/http", "database/sql"],
+      "calls": [{"import": "os", "symbol": "Getenv"}],
+      "reason": "domain code should use project-defined ports instead of host IO"
     }
   ],
-  "test_imports": [
-    {
-      "from": "app",
-      "to": "example.com/project/testutil",
-      "action": "deny",
-      "reason": "production code should not import test helpers"
-    }
-  ]
+  "coupling": {
+    "fan_out_threshold": 12,
+    "layers": ["domain"],
+    "reviewed_fan_out": [
+      {"package": "domain/catalog", "reason": "catalog intentionally aggregates domain registrations"}
+    ]
+  }
 }
 ```
 

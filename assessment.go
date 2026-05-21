@@ -42,19 +42,27 @@ type LookupResult struct {
 }
 
 type (
-	AssessmentGate         = core.AssessmentGate
-	AssessmentOptions      = core.AssessmentOptions
-	ArchitectureRuleAction = core.ArchitectureRuleAction
-	ArchitectureRules      = core.ArchitectureRules
-	ArchitectureImportRule = core.ArchitectureImportRule
-	AssessmentReport       = core.AssessmentReport
-	AssessmentSummary      = core.AssessmentSummary
-	ScoreSet               = core.ScoreSet
-	ValidationSummary      = core.ValidationSummary
-	Finding                = core.Finding
-	Violation              = core.Violation
-	AssessmentSuggestion   = core.AssessmentSuggestion
-	AssessmentProvider     = core.AssessmentProvider
+	AssessmentGate             = core.AssessmentGate
+	AssessmentOptions          = core.AssessmentOptions
+	ArchitectureRuleAction     = core.ArchitectureRuleAction
+	ArchitectureRules          = core.ArchitectureRules
+	ArchitectureImportRule     = core.ArchitectureImportRule
+	ArchitectureLayer          = core.ArchitectureLayer
+	ArchitectureDependencyRule = core.ArchitectureDependencyRule
+	ArchitectureEffectRule     = core.ArchitectureEffectRule
+	ArchitectureScope          = core.ArchitectureScope
+	ArchitectureCallRule       = core.ArchitectureCallRule
+	ArchitectureCouplingRules  = core.ArchitectureCouplingRules
+	ArchitecturePackageNote    = core.ArchitecturePackageNote
+	ArchitectureException      = core.ArchitectureException
+	AssessmentReport           = core.AssessmentReport
+	AssessmentSummary          = core.AssessmentSummary
+	ScoreSet                   = core.ScoreSet
+	ValidationSummary          = core.ValidationSummary
+	Finding                    = core.Finding
+	Violation                  = core.Violation
+	AssessmentSuggestion       = core.AssessmentSuggestion
+	AssessmentProvider         = core.AssessmentProvider
 )
 
 const (

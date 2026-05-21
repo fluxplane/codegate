@@ -33,9 +33,16 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 	}
 	diagnostics := append([]Diagnostic(nil), idx.diagnostics...)
 	diagnostics = append(diagnostics, validation.Diagnostics...)
+	architecturePolicy, err := goArchitecturePolicyAssessment(ctx, snapshot, idx, opts)
+	if err != nil {
+		return AssessmentReport{}, err
+	}
 	findings := goAssessmentFindings(idx, units, validation, opts)
+	findings = append(findings, architecturePolicy.findings...)
+	sortFindings(findings)
 	violations := goAssessmentViolations(validation, opts)
 	violations = append(violations, goArchitectureViolations(idx, opts)...)
+	violations = append(violations, architecturePolicy.violations...)
 	sortViolations(violations)
 	executable := 0
 	for _, proposal := range proposals {
@@ -43,7 +50,7 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 			executable++
 		}
 	}
-	scores := goAssessmentScores(validation.Passed, findings, violations, len(proposals), pressure, opts.Architecture != nil)
+	scores := goAssessmentScores(validation.Passed, findings, violations, len(proposals), pressure, opts)
 	return AssessmentReport{
 		Language: string(Go),
 		Summary: AssessmentSummary{
@@ -234,28 +241,46 @@ func architectureImportViolation(kind string, imp ImportEdge, rule ArchitectureI
 	}
 }
 
-func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions int, pressure float64, hasArchitectureRules bool) ScoreSet {
+func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions int, pressure float64, opts AssessmentOptions) ScoreSet {
 	boundary := 100 - minAssessmentInt(40, countFindings(findings, "architecture_")*10)
 	testBoundary := 100
-	if hasArchitectureRules {
-		boundary = minAssessmentInt(boundary, 100-minAssessmentInt(70, countViolations(violations, "architecture_denied_import")*25))
-		testBoundary = 100 - minAssessmentInt(70, countViolations(violations, "architecture_test_boundary_import")*25)
+	if opts.Architecture != nil {
+		boundaryViolations := countViolations(violations, "architecture_denied_import") + countViolations(violations, "architecture_boundary_violation")
+		testViolations := countViolations(violations, "architecture_test_boundary_import") + countViolations(violations, "architecture_test_boundary_violation")
+		boundary = 100 - minAssessmentInt(100, boundaryViolations*25)
+		testBoundary = 100 - minAssessmentInt(100, testViolations*10)
 	}
 	coupling := 100 - minAssessmentInt(35, countFindings(findings, "architecture_high_fan_out")*5)
+	if opts.Architecture != nil {
+		if opts.Architecture.Coupling.FanOutThreshold > 0 {
+			coupling = 100 - minAssessmentInt(40, countUnallowedFindings(findings, "architecture_fan_out")*2)
+		}
+	}
 	sideEffect := 100
 	coverage := 100 - minAssessmentInt(50, countFindings(findings, "coverage_")*25)
+	if opts.Architecture != nil {
+		sideEffect = 100 - minAssessmentInt(60, countArchitectureEffectViolations(violations, opts.Architecture)*10)
+		coverage = minAssessmentInt(coverage, 100-minAssessmentInt(100, countViolations(violations, "architecture_unknown_package")*20))
+	}
 	maintainability := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100))
 	if maintainability < 50 {
 		maintainability = 50
 	}
-	if !validationPassed {
+	if assessmentGateEnabled(opts, AssessmentGateSafety) && !validationPassed {
 		sideEffect = minAssessmentInt(sideEffect, 50)
 	}
 	overall := minAssessmentInt(boundary, maintainability)
 	overall = minAssessmentInt(overall, coverage)
 	overall = minAssessmentInt(overall, coupling)
 	overall = minAssessmentInt(overall, testBoundary)
-	overall -= minAssessmentInt(30, len(violations)*10)
+	if opts.Architecture != nil && boundary == 100 && assessmentOnlyArchitecture(opts) {
+		softImpact := ceilAssessmentDiv(100-coupling, 10) + ceilAssessmentDiv(100-sideEffect, 20) + ceilAssessmentDiv(100-coverage, 20) + ceilAssessmentDiv(100-testBoundary, 20)
+		overall = 100 - minAssessmentInt(10, softImpact)
+	} else if opts.Architecture != nil && boundary < 100 && assessmentOnlyArchitecture(opts) {
+		overall = boundary
+	} else {
+		overall -= minAssessmentInt(30, len(violations)*10)
+	}
 	if overall < 0 {
 		overall = 0
 	}
@@ -360,6 +385,16 @@ func countFindings(findings []Finding, prefix string) int {
 	return n
 }
 
+func countUnallowedFindings(findings []Finding, prefix string) int {
+	n := 0
+	for _, finding := range findings {
+		if strings.HasPrefix(finding.Kind, prefix) && !finding.Allowed {
+			n++
+		}
+	}
+	return n
+}
+
 func countViolations(violations []Violation, kind string) int {
 	n := 0
 	for _, violation := range violations {
@@ -368,6 +403,48 @@ func countViolations(violations []Violation, kind string) int {
 		}
 	}
 	return n
+}
+
+func countViolationsPrefix(violations []Violation, prefix string) int {
+	n := 0
+	for _, violation := range violations {
+		if strings.HasPrefix(violation.Kind, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func countArchitectureEffectViolations(violations []Violation, rules *ArchitectureRules) int {
+	effectKinds := map[string]bool{
+		"architecture_effect_import": true,
+		"architecture_effect_call":   true,
+	}
+	if rules != nil {
+		for _, rule := range rules.Effects {
+			effectKinds[architectureEffectKind(rule, "architecture_effect_import")] = true
+			effectKinds[architectureEffectKind(rule, "architecture_effect_call")] = true
+		}
+	}
+	n := 0
+	for _, violation := range violations {
+		if effectKinds[violation.Kind] && violation.Severity == "error" {
+			n++
+		}
+	}
+	return n
+}
+
+func assessmentOnlyArchitecture(opts AssessmentOptions) bool {
+	gates := normalizedAssessmentGates(opts.Gates)
+	return len(gates) == 1 && gates[0] == AssessmentGateArchitecture
+}
+
+func ceilAssessmentDiv(n, d int) int {
+	if n <= 0 {
+		return 0
+	}
+	return (n + d - 1) / d
 }
 
 func sortFindings(findings []Finding) {

@@ -395,6 +395,12 @@ func loadArchitectureRules(path string) (*codegate.ArchitectureRules, error) {
 	if err := validateArchitectureRules(rules.TestImports, "test_imports"); err != nil {
 		return nil, err
 	}
+	if err := validateArchitectureDependencies(rules.Dependencies); err != nil {
+		return nil, err
+	}
+	if err := validateArchitectureEffects(rules.Effects); err != nil {
+		return nil, err
+	}
 	return &rules, nil
 }
 
@@ -407,6 +413,34 @@ func validateArchitectureRules(rules []codegate.ArchitectureImportRule, section 
 		}
 		if rule.From == "" && rule.To == "" {
 			return fmt.Errorf("%s[%d] must set from, to, or both", section, i)
+		}
+	}
+	return nil
+}
+
+func validateArchitectureDependencies(rules []codegate.ArchitectureDependencyRule) error {
+	for i, rule := range rules {
+		switch rule.Action {
+		case "", codegate.ArchitectureRuleAllow, codegate.ArchitectureRuleDeny:
+		default:
+			return fmt.Errorf("dependencies[%d] has unsupported action %q", i, rule.Action)
+		}
+		if rule.FromLayer == "" || rule.ToLayer == "" {
+			return fmt.Errorf("dependencies[%d] must set from_layer and to_layer", i)
+		}
+	}
+	return nil
+}
+
+func validateArchitectureEffects(rules []codegate.ArchitectureEffectRule) error {
+	for i, rule := range rules {
+		switch rule.Action {
+		case "", codegate.ArchitectureRuleAllow, codegate.ArchitectureRuleDeny:
+		default:
+			return fmt.Errorf("effects[%d] has unsupported action %q", i, rule.Action)
+		}
+		if len(rule.Imports) == 0 && len(rule.Calls) == 0 {
+			return fmt.Errorf("effects[%d] must set imports, calls, or both", i)
 		}
 	}
 	return nil

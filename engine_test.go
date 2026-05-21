@@ -328,6 +328,145 @@ const Name = "fixture"
 	}
 }
 
+func TestEngineAssessAppliesGenericArchitectureLayerRules(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "core/core.go", `package core
+
+import "example.com/demo/runtime"
+
+func Bad() string {
+	return runtime.Name
+}
+`)
+	writeEngineFile(t, root, "runtime/runtime.go", `package runtime
+
+const Name = "runtime"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			Layers: []ArchitectureLayer{
+				{Name: "core", Prefixes: []string{"core"}},
+				{Name: "runtime", Prefixes: []string{"runtime"}},
+			},
+			Dependencies: []ArchitectureDependencyRule{
+				{FromLayer: "runtime", ToLayer: "core"},
+				{FromLayer: "runtime", ToLayer: "runtime"},
+				{FromLayer: "core", ToLayer: "core"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasViolation(report, "architecture_boundary_violation") || report.Scores.Boundary != 75 {
+		t.Fatalf("expected generic layer boundary violation, got %#v", report)
+	}
+}
+
+func TestEngineAssessAppliesGenericArchitectureEffectRules(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "core/core.go", `package core
+
+import "os"
+
+func Token() string {
+	return os.Getenv("TOKEN")
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			Layers: []ArchitectureLayer{{Name: "domain", Prefixes: []string{"core"}}},
+			Effects: []ArchitectureEffectRule{{
+				Name:    "host_io",
+				Scope:   ArchitectureScope{Layers: []string{"domain"}},
+				Imports: []string{"os"},
+				Calls:   []ArchitectureCallRule{{Import: "os", Symbol: "Getenv"}},
+				Reason:  "domain layer must not access host IO directly",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasViolation(report, "architecture_host_io") || report.Scores.SideEffect >= 100 {
+		t.Fatalf("expected generic effect violation and side-effect score impact, got %#v", report)
+	}
+}
+
+func TestEngineAssessAllowsReviewedFanOut(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "core/hub/hub.go", `package hub
+
+import (
+	"example.com/demo/core/a"
+	"example.com/demo/core/b"
+	"example.com/demo/core/c"
+)
+
+func Names() []string {
+	return []string{a.Name, b.Name, c.Name}
+}
+`)
+	for _, name := range []string{"a", "b", "c"} {
+		writeEngineFile(t, root, "core/"+name+"/"+name+".go", "package "+name+"\n\nconst Name = \""+name+"\"\n")
+	}
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			Layers: []ArchitectureLayer{{Name: "core", Prefixes: []string{"core"}}},
+			Dependencies: []ArchitectureDependencyRule{
+				{FromLayer: "core", ToLayer: "core"},
+			},
+			Coupling: ArchitectureCouplingRules{
+				FanOutThreshold: 2,
+				Layers:          []string{"core"},
+				ReviewedFanOut:  []ArchitecturePackageNote{{Package: "core/hub", Reason: "hub intentionally aggregates core packages"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAllowedFinding(report, "architecture_fan_out") || report.Scores.Coupling != 100 {
+		t.Fatalf("expected reviewed fan-out note without coupling penalty, got %#v", report)
+	}
+}
+
 func TestEngineRejectsMultipleRootsForNow(t *testing.T) {
 	_, err := New().Roots("one", "two").WithLanguage(goast.New()).Build(context.Background())
 	if err == nil {
@@ -338,6 +477,15 @@ func TestEngineRejectsMultipleRootsForNow(t *testing.T) {
 func hasFinding(report AssessmentReport, kind string) bool {
 	for _, finding := range report.Findings {
 		if finding.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAllowedFinding(report AssessmentReport, kind string) bool {
+	for _, finding := range report.Findings {
+		if finding.Kind == kind && finding.Allowed {
 			return true
 		}
 	}
