@@ -22,6 +22,7 @@ type (
 	EnsureGoImport            = core.EnsureGoImport
 	RemoveGoImport            = core.RemoveGoImport
 	RenameGoImport            = core.RenameGoImport
+	RenameGoModulePath        = core.RenameGoModulePath
 	MoveSymbol                = core.MoveSymbol
 	AddGoParameter            = core.AddGoParameter
 	RemoveGoParameter         = core.RemoveGoParameter
@@ -59,6 +60,7 @@ const (
 	OpEnsureGoImport            = core.OpEnsureGoImport
 	OpRemoveGoImport            = core.OpRemoveGoImport
 	OpRenameGoImport            = core.OpRenameGoImport
+	OpRenameGoModulePath        = core.OpRenameGoModulePath
 	OpMoveSymbol                = core.OpMoveSymbol
 	OpAddGoParameter            = core.OpAddGoParameter
 	OpRemoveGoParam             = core.OpRemoveGoParam

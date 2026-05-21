@@ -5,6 +5,7 @@ go 1.24
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/yuin/goldmark v1.8.2
+	golang.org/x/mod v0.25.0
 )
 
 require (

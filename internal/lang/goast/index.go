@@ -44,7 +44,7 @@ func (b GoBackend) Spec() BackendSpec {
 				OpReplaceFunction, OpAppendFunction, OpDeleteFunction, OpReplaceMethod, OpDeleteMethod,
 				OpReplaceSymbol, OpAppendSymbol, OpDeleteSymbol, OpReplaceComment, OpRenameSymbol,
 				OpEnsureStructTag, OpRemoveStructTag, OpEnsureGoImport, OpRemoveGoImport, OpRenameGoImport,
-				OpMoveSymbol, OpAddGoParameter, OpRemoveGoParam, OpRenameGoParam, OpAddGoField,
+				OpRenameGoModulePath, OpMoveSymbol, OpAddGoParameter, OpRemoveGoParam, OpRenameGoParam, OpAddGoField,
 				OpRemoveGoField, OpRenameGoField, OpChangeGoParam, OpChangeGoResult, OpRenameGoRecv,
 				OpAddGoIfaceMeth, OpRemoveGoIface, OpExtractGoFunc, OpExtractGoMethod,
 			},

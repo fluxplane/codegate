@@ -140,6 +140,7 @@ as an agent skill and API proof at the same time.`),
 		a.assessCommand(),
 		a.suggestCommand(),
 		a.validateCommand(),
+		a.operationCommand(),
 		a.cycleCommand(),
 	)
 	return cmd

@@ -261,6 +261,87 @@ func TestCodegateMarkdownCycleApplyFirst(t *testing.T) {
 	}
 }
 
+func TestCodegateOpRunRenameGoModuleDryRun(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module github.com/acme/old\n\ngo 1.24\n")
+	writeFile(t, root, "app.go", `package demo
+
+import "github.com/acme/old/lib"
+
+var _ = lib.Name
+`)
+	writeFile(t, root, "lib/lib.go", `package lib
+
+const Name = "lib"
+`)
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "go", "op", "run", "--kind", "go_module_path_rename", "--from", "github.com/acme/old", "--to", "github.com/acme/new"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{`"dry_run": true`, `"go_module_path_rename"`, "+module github.com/acme/new", `+import \"github.com/acme/new/lib\"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %s in output:\n%s", want, got)
+		}
+	}
+	src, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), "github.com/acme/new") {
+		t.Fatalf("dry run modified go.mod:\n%s", src)
+	}
+}
+
+func TestCodegateOpRunRenameGoModuleJSONPatchAndWrite(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module github.com/acme/old\n\ngo 1.24\n")
+	writeFile(t, root, "app.go", `package demo
+
+import "github.com/acme/old/lib"
+
+var _ = lib.Name
+`)
+	writeFile(t, root, "lib/lib.go", `package lib
+
+const Name = "lib"
+`)
+	opFile := filepath.Join(root, "op.json")
+	writeRulesFile(t, opFile, `{"kind":"go_module_path_rename","old_path":"github.com/acme/old","new_path":"github.com/acme/new"}`)
+	patchFile := filepath.Join(root, "rename.patch")
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "go", "op", "run", "--operation-file", opFile, "--patch", patchFile, "--write"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"written": true`) || !strings.Contains(got, `"patch_path":`) {
+		t.Fatalf("unexpected op run output:\n%s", got)
+	}
+	modSrc, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(modSrc), "module github.com/acme/new") {
+		t.Fatalf("write did not update go.mod:\n%s", modSrc)
+	}
+	patchSrc, err := os.ReadFile(patchFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(patchSrc), "+module github.com/acme/new") || !strings.Contains(string(patchSrc), `+import "github.com/acme/new/lib"`) {
+		t.Fatalf("unexpected patch output:\n%s", patchSrc)
+	}
+}
+
 func TestCodegateAssessRulesCommand(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")

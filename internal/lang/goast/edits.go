@@ -17,6 +17,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/codewandler/codegate/internal/core"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 )
 
 type editCompiler struct {
@@ -60,6 +62,8 @@ func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operat
 		edits, err = compiler.compileRemoveGoImport(ctx, x)
 	case RenameGoImport:
 		edits, err = compiler.compileRenameGoImport(ctx, x)
+	case RenameGoModulePath:
+		edits, err = compiler.compileRenameGoModulePath(ctx, x)
 	case MoveSymbol:
 		edits, err = compiler.compileMoveSymbol(ctx, x)
 	case AddGoParameter:
@@ -597,6 +601,250 @@ func (c editCompiler) compileRenameGoImport(ctx context.Context, op RenameGoImpo
 	}
 	r := rangeOf(pf.fset, imp.Pos(), imp.End())
 	return []FileEdit{{Path: p, Edits: []TextEdit{{Path: p, Range: r, Replacement: formatImportSpec(op.ImportPath, op.Alias)}}}}, nil
+}
+
+func (c editCompiler) compileRenameGoModulePath(ctx context.Context, op RenameGoModulePath) ([]FileEdit, error) {
+	if err := validateGoModulePath("OldPath", op.OldPath); err != nil {
+		return nil, err
+	}
+	if err := validateGoModulePath("NewPath", op.NewPath); err != nil {
+		return nil, err
+	}
+	if op.OldPath == op.NewPath {
+		return nil, errors.New("codegate: RenameGoModulePath requires different old and new paths")
+	}
+	modSrc, err := c.snapshot.ReadFile(ctx, "go.mod")
+	if err != nil {
+		return nil, fmt.Errorf("codegate: read go.mod: %w", err)
+	}
+	modEdit, err := renameModuleDirectiveEdit(modSrc, op.OldPath, op.NewPath)
+	if err != nil {
+		return nil, err
+	}
+	files, err := c.snapshot.ListFiles(ctx, Scope{Language: Go, IncludeTests: true})
+	if err != nil {
+		return nil, err
+	}
+	out := []FileEdit{{Path: "go.mod", Edits: []TextEdit{modEdit}}}
+	for _, p := range files {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		p = core.CleanPath(p)
+		if !moduleRenameGoFile(p) {
+			continue
+		}
+		src, err := c.snapshot.ReadFile(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		edits, err := renameModuleImportEdits(p, src, op.OldPath, op.NewPath)
+		if err != nil {
+			return nil, err
+		}
+		if len(edits) > 0 {
+			out = append(out, FileEdit{Path: p, Edits: edits})
+		}
+	}
+	if len(out) == 1 && len(out[0].Edits) == 0 {
+		return nil, errors.New("codegate: RenameGoModulePath produced no edits")
+	}
+	return out, nil
+}
+
+func validateGoModulePath(field, path string) error {
+	if path == "" {
+		return fmt.Errorf("codegate: RenameGoModulePath requires %s", field)
+	}
+	if strings.TrimSpace(path) != path {
+		return fmt.Errorf("codegate: RenameGoModulePath %s must not contain leading or trailing whitespace", field)
+	}
+	if err := module.CheckPath(path); err == nil {
+		return nil
+	}
+	if err := module.CheckImportPath(path); err != nil {
+		return fmt.Errorf("codegate: invalid RenameGoModulePath %s %q: %w", field, path, err)
+	}
+	return nil
+}
+
+func renameModuleDirectiveEdit(src []byte, oldPath, newPath string) (TextEdit, error) {
+	f, err := modfile.Parse("go.mod", src, nil)
+	if err != nil {
+		return TextEdit{}, fmt.Errorf("codegate: parse go.mod: %w", err)
+	}
+	if f.Module == nil || f.Module.Syntax == nil {
+		return TextEdit{}, errors.New("codegate: go.mod has no module directive")
+	}
+	if f.Module.Mod.Path != oldPath {
+		return TextEdit{}, fmt.Errorf("codegate: go.mod module path is %q, not %q", f.Module.Mod.Path, oldPath)
+	}
+	start := f.Module.Syntax.Start.Byte
+	end := f.Module.Syntax.End.Byte
+	if start < 0 || end < start || end > len(src) {
+		return TextEdit{}, errors.New("codegate: go.mod module directive has invalid source range")
+	}
+	lineEnd := end
+	for lineEnd < len(src) && src[lineEnd] != '\n' && src[lineEnd] != '\r' {
+		lineEnd++
+	}
+	line := string(src[start:lineEnd])
+	oldToken := modfile.AutoQuote(oldPath)
+	newToken := modfile.AutoQuote(newPath)
+	rel := strings.Index(line, oldToken)
+	if rel < 0 && oldToken != oldPath {
+		rel = strings.Index(line, oldPath)
+		oldToken = oldPath
+	}
+	if rel < 0 {
+		return TextEdit{}, fmt.Errorf("codegate: module directive source does not contain %q", oldPath)
+	}
+	return TextEdit{
+		Path:        "go.mod",
+		Range:       Range{Start: Position{Offset: start + rel}, End: Position{Offset: start + rel + len(oldToken)}},
+		Replacement: newToken,
+	}, nil
+}
+
+func renameModuleImportEdits(path string, src []byte, oldPath, newPath string) ([]TextEdit, error) {
+	pf, err := parseOne(path, src)
+	if err != nil {
+		return nil, err
+	}
+	imports := map[*ast.ImportSpec]string{}
+	importPathOffsets := map[int]bool{}
+	for _, imp := range pf.file.Imports {
+		importPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return nil, fmt.Errorf("codegate: parse import path in %s: %w", path, err)
+		}
+		imports[imp] = importPath
+		importPathOffsets[pf.fset.Position(imp.Path.Pos()).Offset] = true
+	}
+	replacements := map[*ast.ImportSpec]string{}
+	for imp, importPath := range imports {
+		if rewritten, ok := rewriteModuleImportPath(importPath, oldPath, newPath); ok {
+			replacements[imp] = rewritten
+		}
+	}
+	for changed, replacement := range replacements {
+		for imp, existing := range imports {
+			if imp != changed && existing == replacement {
+				return nil, fmt.Errorf("codegate: %s would contain duplicate import %q after module rename", path, replacement)
+			}
+		}
+	}
+	edits := make([]TextEdit, 0, len(replacements))
+	for imp, replacement := range replacements {
+		r := rangeOf(pf.fset, imp.Path.Pos(), imp.Path.End())
+		edits = append(edits, TextEdit{
+			Path:        path,
+			Range:       r,
+			Replacement: strconv.Quote(replacement),
+		})
+	}
+	ast.Inspect(pf.file, func(node ast.Node) bool {
+		lit, ok := node.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		start := pf.fset.Position(lit.Pos()).Offset
+		if importPathOffsets[start] {
+			return true
+		}
+		value, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		next, ok := rewriteModulePathReferences(value, oldPath, newPath)
+		if !ok {
+			return true
+		}
+		edits = append(edits, TextEdit{
+			Path:        path,
+			Range:       rangeOf(pf.fset, lit.Pos(), lit.End()),
+			Replacement: formatRenamedModuleStringLiteral(lit.Value, next),
+		})
+		return true
+	})
+	sort.Slice(edits, func(i, j int) bool {
+		return edits[i].Range.Start.Offset < edits[j].Range.Start.Offset
+	})
+	return edits, nil
+}
+
+func rewriteModuleImportPath(importPath, oldPath, newPath string) (string, bool) {
+	switch {
+	case importPath == oldPath:
+		return newPath, true
+	case strings.HasPrefix(importPath, oldPath+"/"):
+		return newPath + strings.TrimPrefix(importPath, oldPath), true
+	default:
+		return "", false
+	}
+}
+
+func rewriteModulePathReferences(value, oldPath, newPath string) (string, bool) {
+	var b strings.Builder
+	changed := false
+	cursor := 0
+	for {
+		rel := strings.Index(value[cursor:], oldPath)
+		if rel < 0 {
+			break
+		}
+		start := cursor + rel
+		end := start + len(oldPath)
+		if !modulePathReferenceStart(value, start) || !modulePathReferenceEnd(value, end) {
+			b.WriteString(value[cursor:end])
+			cursor = end
+			continue
+		}
+		b.WriteString(value[cursor:start])
+		b.WriteString(newPath)
+		cursor = end
+		changed = true
+	}
+	if !changed {
+		return value, false
+	}
+	b.WriteString(value[cursor:])
+	return b.String(), true
+}
+
+func modulePathReferenceStart(value string, start int) bool {
+	return start == 0 || !modulePathTokenByte(value[start-1])
+}
+
+func modulePathReferenceEnd(value string, end int) bool {
+	return end == len(value) || value[end] == '/' || !modulePathTokenByte(value[end])
+}
+
+func modulePathTokenByte(b byte) bool {
+	return b == '/' || b == '-' || b == '.' || b == '_' || b == '~' ||
+		b >= '0' && b <= '9' ||
+		b >= 'A' && b <= 'Z' ||
+		b >= 'a' && b <= 'z'
+}
+
+func formatRenamedModuleStringLiteral(original, value string) string {
+	if strings.HasPrefix(original, "`") && !strings.Contains(value, "`") {
+		return "`" + value + "`"
+	}
+	return strconv.Quote(value)
+}
+
+func moduleRenameGoFile(path string) bool {
+	if !strings.HasSuffix(path, ".go") {
+		return false
+	}
+	if path == "vendor" || strings.HasPrefix(path, "vendor/") || strings.Contains(path, "/vendor/") {
+		return false
+	}
+	if strings.HasPrefix(path, ".git/") || strings.HasPrefix(path, ".cache/") || strings.HasPrefix(path, "tmp/") || strings.HasPrefix(path, ".tmp/") {
+		return false
+	}
+	return true
 }
 
 func (c editCompiler) compileMoveSymbol(ctx context.Context, op MoveSymbol) ([]FileEdit, error) {

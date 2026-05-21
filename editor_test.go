@@ -938,6 +938,126 @@ func C() {}
 	}
 }
 
+func TestRenameGoModulePathUpdatesGoModAndImports(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"go.mod": "module github.com/acme/old\n\ngo 1.24\n",
+		"app.go": `package demo
+
+import (
+	alias "github.com/acme/old/internal/pkg" // keep comment
+	"github.com/acme/old/lib"
+	"github.com/other/module"
+)
+
+var _ = alias.Name
+var _ = lib.Name
+`,
+		"app_test.go": `package demo
+
+import "github.com/acme/old/testkit"
+
+var _ = testkit.Name
+`,
+		"vendor/github.com/acme/old/v.go": `package vendor
+
+import "github.com/acme/old/shouldnotchange"
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameGoModulePath{
+		OldPath: "github.com/acme/old",
+		NewPath: "github.com/acme/new",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	if !strings.Contains(string(got["go.mod"].After), "module github.com/acme/new") {
+		t.Fatalf("go.mod was not renamed:\n%s", got["go.mod"].After)
+	}
+	appAfter := string(got["app.go"].After)
+	for _, want := range []string{
+		`alias "github.com/acme/new/internal/pkg"`,
+		`"github.com/acme/new/lib"`,
+		`"github.com/other/module"`,
+		"// keep comment",
+	} {
+		if !strings.Contains(appAfter, want) {
+			t.Fatalf("app.go missing %q:\n%s", want, appAfter)
+		}
+	}
+	testAfter := string(got["app_test.go"].After)
+	if !strings.Contains(testAfter, `"github.com/acme/new/testkit"`) {
+		t.Fatalf("test import was not renamed:\n%s", testAfter)
+	}
+	if _, ok := got["vendor/github.com/acme/old/v.go"]; ok {
+		t.Fatalf("vendor file should not be edited: %#v", got)
+	}
+}
+
+func TestRenameGoModulePathRejectsUnsafeInputs(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"go.mod": "module github.com/acme/current\n\ngo 1.24\n",
+		"a.go":   "package demo\n",
+	})
+	for name, op := range map[string]RenameGoModulePath{
+		"mismatched old path": {OldPath: "github.com/acme/other", NewPath: "github.com/acme/new"},
+		"invalid new path":    {OldPath: "github.com/acme/current", NewPath: "../bad"},
+		"same path":           {OldPath: "github.com/acme/current", NewPath: "github.com/acme/current"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changes := ed.NewChangeSet()
+			if err := changes.Apply(ctx, op); err == nil {
+				t.Fatal("expected module rename to fail")
+			}
+		})
+	}
+}
+
+func TestRenameGoModulePathRejectsImportCollisions(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"go.mod": "module github.com/acme/old\n\ngo 1.24\n",
+		"a.go": `package demo
+
+import (
+	"github.com/acme/new/lib"
+	"github.com/acme/old/lib"
+)
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameGoModulePath{OldPath: "github.com/acme/old", NewPath: "github.com/acme/new"}); err == nil {
+		t.Fatal("expected duplicate import collision to fail")
+	}
+}
+
+func TestRenameGoModulePathAllowsLocalModuleNames(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"go.mod": "module localmod\n\ngo 1.24\n",
+		"a.go": `package demo
+
+import "localmod/pkg"
+
+var _ = pkg.Name
+`,
+		"pkg/pkg.go": `package pkg
+
+const Name = "pkg"
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameGoModulePath{OldPath: "localmod", NewPath: "newlocalmod"}); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	if !strings.Contains(string(got["go.mod"].After), "module newlocalmod") || !strings.Contains(string(got["a.go"].After), `"newlocalmod/pkg"`) {
+		t.Fatalf("local module rename failed: %#v", got)
+	}
+}
+
 func TestGoImportEditsByUnit(t *testing.T) {
 	ctx := context.Background()
 	ed := newTestEditor(t, map[string]string{

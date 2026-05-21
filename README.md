@@ -188,6 +188,8 @@ go run ./cmd/codegate --root . --language go assess --gate all --summary-only
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
 go run ./cmd/codegate --root . --language go suggest --executable
+go run ./cmd/codegate --root . --language go op run --kind go_module_path_rename --from github.com/old/module --to github.com/new/module
+go run ./cmd/codegate --root . --language go op run --operation-file operation.json --patch operation.patch
 go run ./cmd/codegate --root . --language go cycle
 go run ./cmd/codegate --root . --language markdown assess --gate maintainability
 go run ./cmd/codegate --root . --language markdown cycle --apply-first
@@ -198,6 +200,8 @@ go run ./cmd/codegate --root . --language markdown cycle --apply-first
 `assess` defaults to the compact agent view: scores, compact metrics, counts, and small top lists without full evidence payloads. Use `--view full` for complete reports and `--view summary` or `--summary-only` for the smallest score/count payload.
 
 Use `cycle --apply-first` only when you want the first executable suggestion applied to an in-memory change set and returned as a diff.
+
+Use `op run` when an agent already knows the exact structured edit operation to execute. It defaults to dry-run JSON with validation and a unified diff. Add `--patch file.patch` to persist the diff, or `--write` to write validated changes back to the workspace.
 
 ## Agent Loop Examples
 
@@ -292,6 +296,7 @@ Built-in backends:
 - no hidden shell commands
 - no automatic test or build execution
 - no persistent writes from core analysis
+- CLI writes require explicit `op run --write`
 - no opaque rewrites without structured operations
 - no commits until callers inspect and commit a change set
 

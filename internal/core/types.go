@@ -692,6 +692,7 @@ const (
 	OpEnsureGoImport            OperationKind = "go_import_ensure"
 	OpRemoveGoImport            OperationKind = "go_import_remove"
 	OpRenameGoImport            OperationKind = "go_import_rename"
+	OpRenameGoModulePath        OperationKind = "go_module_path_rename"
 	OpMoveSymbol                OperationKind = "move_symbol"
 	OpAddGoParameter            OperationKind = "go_parameter_add"
 	OpRemoveGoParam             OperationKind = "go_parameter_remove"
@@ -724,291 +725,298 @@ type FileEdit struct {
 }
 
 type ReplaceFunction struct {
-	Target       SymbolSelector
-	Source       string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Source       string         `json:"source"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ReplaceFunction) Kind() OperationKind { return OpReplaceFunction }
 
 type ReplaceSymbol struct {
-	Target       SymbolSelector
-	Source       string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Source       string         `json:"source"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ReplaceSymbol) Kind() OperationKind { return OpReplaceSymbol }
 
 type RenameSymbol struct {
-	Target       SymbolSelector
-	NewName      string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	NewName      string         `json:"new_name"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RenameSymbol) Kind() OperationKind { return OpRenameSymbol }
 
 type AppendFunction struct {
-	Path   string
-	UnitID string
-	Source string
+	Path   string `json:"path,omitempty"`
+	UnitID string `json:"unit_id,omitempty"`
+	Source string `json:"source"`
 }
 
 func (AppendFunction) Kind() OperationKind { return OpAppendFunction }
 
 type AppendSymbol struct {
-	Path   string
-	UnitID string
-	Source string
+	Path   string `json:"path,omitempty"`
+	UnitID string `json:"unit_id,omitempty"`
+	Source string `json:"source"`
 }
 
 func (AppendSymbol) Kind() OperationKind { return OpAppendSymbol }
 
 type DeleteSymbol struct {
-	Target       SymbolSelector
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (DeleteSymbol) Kind() OperationKind { return OpDeleteSymbol }
 
 type DeleteFunction struct {
-	Target       SymbolSelector
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (DeleteFunction) Kind() OperationKind { return OpDeleteFunction }
 
 type ReplaceMethod struct {
-	Target       SymbolSelector
-	Source       string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Source       string         `json:"source"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ReplaceMethod) Kind() OperationKind { return OpReplaceMethod }
 
 type DeleteMethod struct {
-	Target       SymbolSelector
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (DeleteMethod) Kind() OperationKind { return OpDeleteMethod }
 
 type ReplaceComment struct {
-	Target       SymbolSelector
-	Text         string
-	Style        string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Text         string         `json:"text"`
+	Style        string         `json:"style,omitempty"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ReplaceComment) Kind() OperationKind { return OpReplaceComment }
 
 type EnsureGoStructTag struct {
-	Struct  SymbolSelector
-	Field   string
-	Key     string
-	Value   string
-	Options []string
+	Struct  SymbolSelector `json:"struct"`
+	Field   string         `json:"field"`
+	Key     string         `json:"key"`
+	Value   string         `json:"value"`
+	Options []string       `json:"options,omitempty"`
 }
 
 func (EnsureGoStructTag) Kind() OperationKind { return OpEnsureStructTag }
 
 type RemoveGoStructTag struct {
-	Struct SymbolSelector
-	Field  string
-	Key    string
+	Struct SymbolSelector `json:"struct"`
+	Field  string         `json:"field"`
+	Key    string         `json:"key"`
 }
 
 func (RemoveGoStructTag) Kind() OperationKind { return OpRemoveStructTag }
 
 type EnsureGoImport struct {
-	Path       string
-	UnitID     string
-	ImportPath string
-	Alias      string
+	Path       string `json:"path,omitempty"`
+	UnitID     string `json:"unit_id,omitempty"`
+	ImportPath string `json:"import_path"`
+	Alias      string `json:"alias,omitempty"`
 }
 
 func (EnsureGoImport) Kind() OperationKind { return OpEnsureGoImport }
 
 type RemoveGoImport struct {
-	Path       string
-	UnitID     string
-	ImportPath string
-	Alias      string
+	Path       string `json:"path,omitempty"`
+	UnitID     string `json:"unit_id,omitempty"`
+	ImportPath string `json:"import_path"`
+	Alias      string `json:"alias,omitempty"`
 }
 
 func (RemoveGoImport) Kind() OperationKind { return OpRemoveGoImport }
 
 type RenameGoImport struct {
-	Path       string
-	UnitID     string
-	ImportPath string
-	Alias      string
+	Path       string `json:"path,omitempty"`
+	UnitID     string `json:"unit_id,omitempty"`
+	ImportPath string `json:"import_path,omitempty"`
+	Alias      string `json:"alias,omitempty"`
 }
 
 func (RenameGoImport) Kind() OperationKind { return OpRenameGoImport }
 
+type RenameGoModulePath struct {
+	OldPath string `json:"old_path"`
+	NewPath string `json:"new_path"`
+}
+
+func (RenameGoModulePath) Kind() OperationKind { return OpRenameGoModulePath }
+
 type MoveSymbol struct {
-	Target           SymbolSelector
-	ToPath           string
-	ExpectedHash     string
-	ReconcileImports bool
+	Target           SymbolSelector `json:"target"`
+	ToPath           string         `json:"to_path"`
+	ExpectedHash     string         `json:"expected_hash,omitempty"`
+	ReconcileImports bool           `json:"reconcile_imports,omitempty"`
 }
 
 func (MoveSymbol) Kind() OperationKind { return OpMoveSymbol }
 
 type AddGoParameter struct {
-	Target       SymbolSelector
-	Name         string
-	Type         string
-	DefaultValue string
-	Position     int
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	DefaultValue string         `json:"default_value,omitempty"`
+	Position     int            `json:"position,omitempty"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (AddGoParameter) Kind() OperationKind { return OpAddGoParameter }
 
 type RemoveGoParameter struct {
-	Target       SymbolSelector
-	Name         string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Name         string         `json:"name"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RemoveGoParameter) Kind() OperationKind { return OpRemoveGoParam }
 
 type RenameGoParameter struct {
-	Target       SymbolSelector
-	OldName      string
-	NewName      string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	OldName      string         `json:"old_name"`
+	NewName      string         `json:"new_name"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RenameGoParameter) Kind() OperationKind { return OpRenameGoParam }
 
 type AddGoStructField struct {
-	Struct       SymbolSelector
-	Name         string
-	Type         string
-	Tag          string
-	Comment      string
-	Position     int
-	ExpectedHash string
+	Struct       SymbolSelector `json:"struct"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	Tag          string         `json:"tag,omitempty"`
+	Comment      string         `json:"comment,omitempty"`
+	Position     int            `json:"position,omitempty"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (AddGoStructField) Kind() OperationKind { return OpAddGoField }
 
 type RemoveGoStructField struct {
-	Struct       SymbolSelector
-	Field        string
-	ExpectedHash string
+	Struct       SymbolSelector `json:"struct"`
+	Field        string         `json:"field"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RemoveGoStructField) Kind() OperationKind { return OpRemoveGoField }
 
 type RenameGoStructField struct {
-	Struct          SymbolSelector
-	OldName         string
-	NewName         string
-	UpdateSelectors bool
-	ExpectedHash    string
+	Struct          SymbolSelector `json:"struct"`
+	OldName         string         `json:"old_name"`
+	NewName         string         `json:"new_name"`
+	UpdateSelectors bool           `json:"update_selectors,omitempty"`
+	ExpectedHash    string         `json:"expected_hash,omitempty"`
 }
 
 func (RenameGoStructField) Kind() OperationKind { return OpRenameGoField }
 
 type ChangeGoParameterType struct {
-	Target       SymbolSelector
-	Name         string
-	Type         string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ChangeGoParameterType) Kind() OperationKind { return OpChangeGoParam }
 
 type ChangeGoResultType struct {
-	Target       SymbolSelector
-	Name         string
-	Position     int
-	Type         string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	Name         string         `json:"name,omitempty"`
+	Position     int            `json:"position,omitempty"`
+	Type         string         `json:"type"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (ChangeGoResultType) Kind() OperationKind { return OpChangeGoResult }
 
 type RenameGoReceiver struct {
-	Target       SymbolSelector
-	NewName      string
-	ExpectedHash string
+	Target       SymbolSelector `json:"target"`
+	NewName      string         `json:"new_name"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RenameGoReceiver) Kind() OperationKind { return OpRenameGoRecv }
 
 type AddGoInterfaceMethod struct {
-	Interface    SymbolSelector
-	Method       string
-	Position     int
-	ExpectedHash string
+	Interface    SymbolSelector `json:"interface"`
+	Method       string         `json:"method"`
+	Position     int            `json:"position,omitempty"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (AddGoInterfaceMethod) Kind() OperationKind { return OpAddGoIfaceMeth }
 
 type RemoveGoInterfaceMethod struct {
-	Interface    SymbolSelector
-	Method       string
-	ExpectedHash string
+	Interface    SymbolSelector `json:"interface"`
+	Method       string         `json:"method"`
+	ExpectedHash string         `json:"expected_hash,omitempty"`
 }
 
 func (RemoveGoInterfaceMethod) Kind() OperationKind { return OpRemoveGoIface }
 
 type ExtractGoFunction struct {
-	Path            string
-	Range           Range
-	Name            string
-	Params          string
-	Results         string
-	InsertAfter     SymbolSelector
-	ReplaceWithCall string
+	Path            string         `json:"path"`
+	Range           Range          `json:"range"`
+	Name            string         `json:"name"`
+	Params          string         `json:"params,omitempty"`
+	Results         string         `json:"results,omitempty"`
+	InsertAfter     SymbolSelector `json:"insert_after,omitempty"`
+	ReplaceWithCall string         `json:"replace_with_call"`
 }
 
 func (ExtractGoFunction) Kind() OperationKind { return OpExtractGoFunc }
 
 type ExtractGoMethod struct {
-	Path            string
-	Range           Range
-	Receiver        string
-	Name            string
-	Params          string
-	Results         string
-	InsertAfter     SymbolSelector
-	ReplaceWithCall string
+	Path            string         `json:"path"`
+	Range           Range          `json:"range"`
+	Receiver        string         `json:"receiver"`
+	Name            string         `json:"name"`
+	Params          string         `json:"params,omitempty"`
+	Results         string         `json:"results,omitempty"`
+	InsertAfter     SymbolSelector `json:"insert_after,omitempty"`
+	ReplaceWithCall string         `json:"replace_with_call"`
 }
 
 func (ExtractGoMethod) Kind() OperationKind { return OpExtractGoMethod }
 
 type EnsureMarkdownH1 struct {
-	Path  string
-	Title string
+	Path  string `json:"path"`
+	Title string `json:"title"`
 }
 
 func (EnsureMarkdownH1) Kind() OperationKind { return OpMarkdownEnsureH1 }
 
 type SetMarkdownHeadingLevel struct {
-	Path   string
-	Offset int
-	Level  int
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+	Level  int    `json:"level"`
 }
 
 func (SetMarkdownHeadingLevel) Kind() OperationKind { return OpMarkdownSetHeadingLevel }
 
 type InsertMarkdownSectionBody struct {
-	Path   string
-	Offset int
-	Text   string
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+	Text   string `json:"text"`
 }
 
 func (InsertMarkdownSectionBody) Kind() OperationKind { return OpMarkdownInsertSectionBody }
 
 type RenameMarkdownHeading struct {
-	Path    string
-	Offset  int
-	NewText string
+	Path    string `json:"path"`
+	Offset  int    `json:"offset"`
+	NewText string `json:"new_text"`
 }
 
 func (RenameMarkdownHeading) Kind() OperationKind { return OpMarkdownRenameHeading }
