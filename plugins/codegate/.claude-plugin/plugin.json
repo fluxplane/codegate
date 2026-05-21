@@ -1,0 +1,16 @@
+{
+  "name": "codegate",
+  "version": "0.1.0",
+  "description": "Claude Code workflows for structured code assessment, quality review, and codegate-driven improvement loops.",
+  "author": {
+    "name": "Fluxplane"
+  },
+  "repository": "https://github.com/fluxplane/codegate",
+  "license": "MIT",
+  "keywords": [
+    "code-quality",
+    "architecture",
+    "assessment",
+    "agents"
+  ]
+}
