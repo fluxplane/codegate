@@ -2186,13 +2186,40 @@ func importLocalName(importPath, alias string) string {
 		return alias
 	}
 	importPath = strings.TrimRight(importPath, "/")
-	if i := strings.LastIndexByte(importPath, '/'); i >= 0 {
-		importPath = importPath[i+1:]
+	parts := strings.Split(importPath, "/")
+	name := parts[len(parts)-1]
+	if semanticImportVersion(name) && len(parts) >= 2 {
+		name = parts[len(parts)-2]
 	}
-	if !isValidIdentifier(importPath) {
+	if dot := strings.LastIndex(name, ".v"); dot > 0 && semanticImportVersion(name[dot+1:]) {
+		name = name[:dot]
+	}
+	name = goModulePackageName(name)
+	if !isValidIdentifier(name) {
 		return ""
 	}
-	return importPath
+	return name
+}
+
+func goModulePackageName(name string) string {
+	name = strings.TrimPrefix(name, "go-")
+	name = strings.TrimSuffix(name, "-go")
+	return name
+}
+
+func semanticImportVersion(segment string) bool {
+	if len(segment) < 2 || segment[0] != 'v' {
+		return false
+	}
+	if segment[1] < '2' || segment[1] > '9' {
+		return false
+	}
+	for i := 2; i < len(segment); i++ {
+		if segment[i] < '0' || segment[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func selectorQualifierNames(src string) map[string]bool {

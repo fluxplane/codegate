@@ -17,10 +17,11 @@ import (
 )
 
 type cliConfig struct {
-	root         string
-	language     string
-	includeTests bool
-	format       string
+	root             string
+	language         string
+	includeTests     bool
+	includeGenerated bool
+	format           string
 }
 
 type app struct {
@@ -57,6 +58,8 @@ type cycleResult struct {
 type compactAssessmentReport struct {
 	Root                  string                     `json:"root"`
 	Language              string                     `json:"language"`
+	Rating                string                     `json:"rating"`
+	ScoreMax              int                        `json:"score_max"`
 	Summary               codegate.AssessmentSummary `json:"summary"`
 	Scores                codegate.ScoreSet          `json:"scores"`
 	Validation            codegate.ValidationSummary `json:"validation"`
@@ -133,7 +136,9 @@ as an agent skill and API proof at the same time.`),
 	cmd.PersistentFlags().StringVar(&a.cfg.root, "root", ".", "workspace root")
 	cmd.PersistentFlags().StringVar(&a.cfg.language, "language", "go", "language backend")
 	cmd.PersistentFlags().BoolVar(&a.cfg.includeTests, "tests", false, "include test files")
-	cmd.PersistentFlags().StringVar(&a.cfg.format, "format", "json", "output format: json")
+	cmd.PersistentFlags().BoolVar(&a.cfg.includeGenerated, "generated", false, "include generated source files")
+	cmd.PersistentFlags().BoolVar(&a.cfg.includeGenerated, "include-generated", false, "include generated source files")
+	cmd.PersistentFlags().StringVar(&a.cfg.format, "format", "json", "output format: json or html for assess")
 	cmd.AddCommand(
 		a.capabilitiesCommand(),
 		a.lookupCommand(),
@@ -235,15 +240,25 @@ func (a *app) assessCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if summaryOnly {
-				view = "summary"
-			}
-			output, err := assessmentOutput(report, view)
-			if err != nil {
-				return err
-			}
-			if err := a.print(output); err != nil {
-				return err
+			if a.cfg.format == "html" {
+				html, err := renderAssessmentHTML(report, reportContext{Root: a.cfg.root, Generator: "github.com/fluxplane/codegate", GeneratedAt: timeNow()})
+				if err != nil {
+					return err
+				}
+				if _, err := io.WriteString(a.out, html); err != nil {
+					return err
+				}
+			} else {
+				if summaryOnly {
+					view = "summary"
+				}
+				output, err := assessmentOutput(report, view)
+				if err != nil {
+					return err
+				}
+				if err := a.print(output); err != nil {
+					return err
+				}
 			}
 			categories, err := parseAssessmentFailureCategories(failOn)
 			if err != nil {
@@ -400,7 +415,7 @@ func (a *app) engine(ctx context.Context) (codegate.Engine, codegate.Scope, erro
 	}
 	builder := codegate.New().
 		Roots(a.cfg.root).
-		WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).
+		WithSource(dirSource{root: a.cfg.root, fsys: os.DirFS(a.cfg.root)}).
 		WithLanguage(golang.New(golang.Config{})).
 		WithLanguage(markdown.New(markdown.Config{}))
 	for _, adapter := range a.validationAdapters {
@@ -410,7 +425,7 @@ func (a *app) engine(ctx context.Context) (codegate.Engine, codegate.Scope, erro
 	if err != nil {
 		return nil, codegate.Scope{}, err
 	}
-	return eng, codegate.Scope{Language: lang, IncludeTests: a.cfg.includeTests}, nil
+	return eng, codegate.Scope{Language: lang, IncludeTests: a.cfg.includeTests, IncludeGenerated: a.cfg.includeGenerated}, nil
 }
 
 func (a *app) assess(ctx context.Context, limit int, gates []codegate.AssessmentGate, rules *codegate.ArchitectureRules) (codegate.AssessmentReport, error) {
@@ -438,6 +453,8 @@ func summarizeAssessmentReport(report codegate.AssessmentReport, view string) co
 	out := compactAssessmentReport{
 		Root:                  report.Root,
 		Language:              report.Language,
+		Rating:                assessmentRating(report.Scores.Overall),
+		ScoreMax:              100,
 		Summary:               report.Summary,
 		Scores:                report.Scores,
 		Validation:            report.Validation,
@@ -828,7 +845,12 @@ func validateArchitectureEffects(rules []codegate.ArchitectureEffectRule) error 
 }
 
 type dirSource struct {
+	root string
 	fsys fs.FS
+}
+
+func (s dirSource) WorkspaceRoot() string {
+	return s.root
 }
 
 func (s dirSource) ListFiles(ctx context.Context, scope codegate.Scope) ([]string, error) {

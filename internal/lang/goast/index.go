@@ -32,7 +32,7 @@ func (b GoBackend) Spec() BackendSpec {
 			{Capability: CapabilityQuality, Level: CapabilityBasic, Notes: "Computes pressure, debt, complexity, shape, safety, and performance smell metrics."},
 			{Capability: CapabilityEditing, Level: CapabilityAdvanced, Notes: "Compiles structured Go edit operations into formatted source changes."},
 			{Capability: CapabilityRefactoring, Level: CapabilityBasic, Notes: "Supports executable low-risk operations plus advisory higher-level proposals."},
-			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Runs parse checks and best-effort type checking for local module code."},
+			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Runs parse checks plus real Go package-loader type checking for disk-backed workspaces; falls back to AST-only checks for in-memory sources."},
 			{Capability: CapabilityReporting, Level: CapabilityBasic, Notes: "Feeds package, metric, diagnostic, and proposal data into assessment reports."},
 		},
 		Operations: OperationSupport{
@@ -49,7 +49,7 @@ func (b GoBackend) Spec() BackendSpec {
 				OpAddGoIfaceMeth, OpRemoveGoIface, OpExtractGoFunc, OpExtractGoMethod,
 			},
 			RefactorKinds: []RefactorKind{RefactorDeleteSymbol, RefactorExtractFunction, RefactorIntroduceConfig, RefactorSplitFunction, RefactorSplitPackage, RefactorReplaceFlagArgument, RefactorReviewDebtMarkers},
-			Notes:         []string{"Go edits are AST-backed and formatted in memory; typecheck validation is best-effort."},
+			Notes:         []string{"Go edits are AST-backed and formatted in memory; disk-backed typecheck validation uses the Go package loader."},
 		},
 		ResolutionMode: "ast",
 	}

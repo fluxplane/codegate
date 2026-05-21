@@ -10,6 +10,7 @@ go run ./cmd/codegate --root . --language markdown assess --gate all
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
 go run ./cmd/codegate --root . --language go assess --gate all --view full --suggestions 3
 go run ./cmd/codegate --root . --language go assess --gate all --summary-only
+go run ./cmd/codegate --root . --language go --format html assess --gate all > /tmp/codegate-release-report.html
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules examples/agentruntime-architecture.rules.json --summary-only
 ```
 

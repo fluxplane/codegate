@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>codegate quality report</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<style>
+:root{color-scheme:light;--bg:#f6f7f9;--panel:#fff;--ink:#15202b;--muted:#5b6673;--line:#d9dee7;--good:#0f7b45;--warn:#a95f00;--bad:#b42318;--blue:#195fb0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}header{background:#111827;color:#fff;padding:28px 36px}h1{margin:0 0 8px;font-size:28px;letter-spacing:0}header p{margin:4px 0;color:#d1d5db}main{max-width:1280px;margin:0 auto;padding:24px 28px 48px}section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px;margin:18px 0;box-shadow:0 1px 2px rgba(15,23,42,.04)}h2{margin:0 0 14px;font-size:19px}h3{margin:18px 0 10px;font-size:15px;color:#263241}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.card{border-left:5px solid var(--blue);background:#f9fafb;border-radius:6px;padding:14px;min-height:84px}.card.good{border-color:var(--good)}.card.warn{border-color:var(--warn)}.card.bad{border-color:var(--bad)}.label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.value{font-size:28px;font-weight:700;margin-top:4px}.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 20px}.kv div{padding:6px 0;border-bottom:1px solid #eef1f5}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid #edf0f4}th{color:#344054;font-size:12px;text-transform:uppercase;letter-spacing:.03em;background:#f8fafc;position:sticky;top:0}code{background:#eef2f7;padding:1px 4px;border-radius:4px;font-size:12px;overflow-wrap:anywhere}.muted{color:var(--muted);font-size:12px}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-weight:700}.badge.good{color:var(--good);background:#e7f6ee}.badge.warn{color:var(--warn);background:#fff4dd}.badge.bad{color:var(--bad);background:#fdecec}.bar{width:160px;height:9px;background:#eef2f7;border-radius:999px;overflow:hidden}.bar span{display:block;height:100%;background:#466b9f}.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}.actions{margin-top:12px}.actions a{display:inline-block;color:#fff;background:#195fb0;border-radius:6px;padding:8px 12px;text-decoration:none;font-weight:700}details.evidence{margin-top:8px}details.evidence summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:12px}details.evidence summary:hover{text-decoration:underline}.evidence-item{margin-top:10px}.evidence-meta{color:var(--muted);font-size:12px;margin-bottom:4px}.evidence-meta code{background:#f1f5f9}.evidence-item pre{margin:6px 0 0;background:#f8fafc;border:1px solid var(--line);border-radius:6px;max-width:760px;overflow:auto}.evidence-item pre code{display:block;background:transparent;padding:10px;font-size:12px;line-height:1.45;white-space:pre;overflow-wrap:normal}@media(max-width:760px){main{padding:16px}header{padding:22px 18px}.two{grid-template-columns:1fr}.bar{width:90px}.evidence-item pre{max-width:calc(100vw - 72px)}}
+</style>
+</head>
+<body>
+<header>
+<h1>codegate quality report</h1>
+<p><strong>Generator:</strong> {{.Generator}}</p>
+<p><strong>Generated:</strong> {{.Generated}}</p>
+<p><strong>Module:</strong> {{.Module}} · <strong>Ref:</strong> {{.Ref}}</p>
+<div class="actions"><a id="download-json" href="#" download="codegate-assessment.json">Download JSON</a></div>
+</header>
+<main>
+<section>
+<h2>Executive Summary</h2>
+<div class="grid">
+{{range .Cards}}<div class="card {{.Class}}"><div class="label">{{.Label}}</div><div class="value">{{.Value}}</div></div>{{end}}
+</div>
+<h3>Run Details</h3>
+<div class="kv">
+{{range .RunDetails}}<div><strong>{{.Label}}:</strong> {{if .BadgeClass}}<span class="badge {{.BadgeClass}}">{{.Value}}</span>{{else}}{{.Value}}{{end}}</div>{{end}}
+</div>
+</section>
+<section>
+<h2>Scores</h2>
+<p class="muted">Scores are bounded 0-100, where 100 means no detected penalty for that gate. Pressure is unbounded and is used for prioritization, not grading.</p>
+{{template "keyValueTable" .ScoreRows}}
+</section>
+<section class="two">
+<div>
+<h2>Finding Counts</h2>
+{{template "countTable" .FindingCounts}}
+<h3>Finding Severity</h3>
+{{template "countTable" .FindingSeverity}}
+</div>
+<div>
+<h2>Violation Counts</h2>
+{{template "countTable" .ViolationCounts}}
+<h3>Violation Severity</h3>
+{{template "countTable" .ViolationSeverity}}
+</div>
+</section>
+<section>
+<h2>Key Metrics</h2>
+<p class="muted">Scalar metrics only. Full structured metric maps are available in the embedded JSON download.</p>
+{{template "keyValueTable" .MetricRows}}
+</section>
+<section>
+<h2>Top Pressure Units</h2>
+{{if .Units}}
+<table><thead><tr><th>Unit</th><th>LOC</th><th>Files</th><th>Fan In</th><th>Fan Out</th><th>Call In</th><th>Call Out</th><th>Public</th><th>Pressure</th></tr></thead><tbody>
+{{range .Units}}<tr><td><code>{{.UnitID}}</code></td><td>{{.LOC}}</td><td>{{.FileCount}}</td><td>{{.DirectFanIn}}</td><td>{{.DirectFanOut}}</td><td>{{.CallFanIn}}</td><td>{{.CallFanOut}}</td><td>{{.PublicSymbolCount}}</td><td>{{.PressureScore}}</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+</section>
+<section>
+<h2>Violations</h2>
+{{template "issueTable" .Violations}}
+</section>
+<section>
+<h2>Findings</h2>
+{{template "issueTable" .Findings}}
+</section>
+<section>
+<h2>Diagnostics</h2>
+{{if .Diagnostics.Note}}<p class="muted">{{.Diagnostics.Note}}</p>{{end}}
+{{if .Diagnostics.Rows}}
+<table><thead><tr><th>Severity</th><th>Location</th><th>Message</th></tr></thead><tbody>
+{{range .Diagnostics.Rows}}<tr><td><code>{{.Severity}}</code></td><td>{{.Location}}</td><td>{{.Message}}</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+</section>
+<section>
+<h2>Suggestions</h2>
+{{if .Suggestions.Note}}<p class="muted">{{.Suggestions.Note}}</p>{{end}}
+{{if .Suggestions.Rows}}
+<table><thead><tr><th>Kind</th><th>Suggestion</th><th>Confidence</th><th>Risk</th><th>Ops</th></tr></thead><tbody>
+{{range .Suggestions.Rows}}<tr><td><code>{{.Kind}}</code><div class="muted">{{.ID}}</div></td><td>{{.Title}}<div class="muted">{{.Summary}}</div>{{template "evidenceDetails" .Evidence}}</td><td>{{.Confidence}}</td><td>{{.Risk}}</td><td>{{.Operations}}</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+</section>
+<script type="application/json" id="codegate-report-json">{{.EmbeddedJSON}}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+document.getElementById("download-json").addEventListener("click", function(event) {
+  event.preventDefault();
+  const json = document.getElementById("codegate-report-json").textContent;
+  const blob = new Blob([json], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "codegate-assessment.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+if (window.hljs) {
+  window.hljs.highlightAll();
+}
+</script>
+</main>
+</body>
+</html>
+
+{{define "keyValueTable"}}
+{{if .}}
+<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>
+{{range .}}<tr><td><code>{{.Key}}</code></td><td>{{.Value}}</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+{{end}}
+
+{{define "countTable"}}
+{{if .}}
+<table><thead><tr><th>Kind</th><th>Count</th><th>Share</th></tr></thead><tbody>
+{{range .}}<tr><td><code>{{.Key}}</code></td><td>{{.Value}}</td><td><div class="bar"><span style="width:{{.Percent}}%"></span></div></td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+{{end}}
+
+{{define "issueTable"}}
+{{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
+{{if .Rows}}
+<table><thead><tr><th>Kind</th><th>Location</th><th>Scope</th><th>Reason</th></tr></thead><tbody>
+{{range .Rows}}<tr><td><code>{{.Kind}}</code><div class="muted">{{.Severity}}</div></td><td>{{.Location}}</td><td>{{.Package}}<div class="muted">{{.Symbol}}</div></td><td>{{.Reason}}{{template "evidenceDetails" .Evidence}}</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">None.</p>{{end}}
+{{end}}
+
+{{define "evidenceDetails"}}
+{{if .}}
+<details class="evidence">
+<summary>Evidence ({{len .}})</summary>
+{{range .}}
+<div class="evidence-item">
+<div class="evidence-meta">{{if .Kind}}<code>{{.Kind}}</code>{{end}}{{if .Location}} {{if .Kind}}·{{end}} {{.Location}}{{end}}</div>
+{{if .Message}}<pre><code class="language-{{.Language}}">{{.Message}}</code></pre>{{end}}
+{{if .Metrics}}<pre><code class="language-json">{{.Metrics}}</code></pre>{{end}}
+</div>
+{{end}}
+</details>
+{{end}}
+{{end}}

@@ -26,7 +26,7 @@ func main() {
 }
 
 func run(ctx context.Context, root string, includeTests bool, maxProposals int) error {
-	source := dirSource{fsys: os.DirFS(root)}
+	source := dirSource{root: root, fsys: os.DirFS(root)}
 	ed, err := codegate.NewEditor(".", codegate.WithSource(source), codegate.WithLanguage(codegate.Go))
 	if err != nil {
 		return err
@@ -90,7 +90,12 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 }
 
 type dirSource struct {
+	root string
 	fsys fs.FS
+}
+
+func (s dirSource) WorkspaceRoot() string {
+	return s.root
 }
 
 func (s dirSource) ListFiles(ctx context.Context, scope codegate.Scope) ([]string, error) {

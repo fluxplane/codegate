@@ -834,6 +834,27 @@ func (e *Editor) snapshot(overlay map[string][]byte) editorSnapshot {
 	return editorSnapshot{editor: e, overlay: overlay}
 }
 
+func (s editorSnapshot) WorkspaceRoot() string {
+	if len(s.overlay) > 0 {
+		return ""
+	}
+	s.editor.mu.RLock()
+	hasEditorOverlay := len(s.editor.overlay) > 0
+	s.editor.mu.RUnlock()
+	if hasEditorOverlay {
+		return ""
+	}
+	if s.editor.source != nil {
+		if rooter, ok := s.editor.source.(interface{ WorkspaceRoot() string }); ok {
+			return rooter.WorkspaceRoot()
+		}
+	}
+	if filepath.IsAbs(s.editor.root) {
+		return s.editor.root
+	}
+	return ""
+}
+
 func (s editorSnapshot) ListFiles(ctx context.Context, scope Scope) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

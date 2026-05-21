@@ -476,13 +476,14 @@ type Evidence struct {
 }
 
 type Scope struct {
-	Root         string     `json:"root,omitempty"`
-	Path         string     `json:"path,omitempty"`
-	UnitID       string     `json:"unit_id,omitempty"`
-	Language     LanguageID `json:"language,omitempty"`
-	IncludeTests bool       `json:"include_tests,omitempty"`
-	MaxFiles     int        `json:"max_files,omitempty"`
-	MaxBytes     int64      `json:"max_bytes,omitempty"`
+	Root             string     `json:"root,omitempty"`
+	Path             string     `json:"path,omitempty"`
+	UnitID           string     `json:"unit_id,omitempty"`
+	Language         LanguageID `json:"language,omitempty"`
+	IncludeTests     bool       `json:"include_tests,omitempty"`
+	IncludeGenerated bool       `json:"include_generated,omitempty"`
+	MaxFiles         int        `json:"max_files,omitempty"`
+	MaxBytes         int64      `json:"max_bytes,omitempty"`
 }
 
 type SymbolSelector struct {

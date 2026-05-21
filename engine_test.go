@@ -825,7 +825,7 @@ func Perf(next func() (int, bool)) []int {
 	}
 }
 
-func TestEngineAssessSkipsGeneratedAndVendorQualityFindings(t *testing.T) {
+func TestEngineAssessSkipsGeneratedAndVendorByDefault(t *testing.T) {
 	root := t.TempDir()
 	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
 	noisy := `package demo
@@ -884,8 +884,19 @@ func Complex(a, b, c, d, e, f int) int {
 	if report.Metrics["max_cyclomatic_complexity"] != 1 {
 		t.Fatalf("expected only normal file metrics, got %#v", report.Metrics)
 	}
+	if report.Metrics["generated_loc_percent"] != 0 || hasFinding(report, "quality_high_generated_ratio") {
+		t.Fatalf("expected generated LOC to be excluded by default, got %#v %#v", report.Metrics, report.Findings)
+	}
+
+	report, err = eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go, IncludeGenerated: true},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if report.Metrics["generated_loc_percent"] == 0 || !hasFinding(report, "quality_high_generated_ratio") {
-		t.Fatalf("expected generated LOC to be counted as an aggregate signal, got %#v %#v", report.Metrics, report.Findings)
+		t.Fatalf("expected generated LOC to be counted when requested, got %#v %#v", report.Metrics, report.Findings)
 	}
 }
 

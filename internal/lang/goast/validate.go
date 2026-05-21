@@ -9,10 +9,13 @@ import (
 	"go/scanner"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/fluxplane/codegate/internal/core"
+	"golang.org/x/tools/go/packages"
 )
 
 func (b GoBackend) Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error) {
@@ -33,21 +36,46 @@ func (b GoBackend) Validate(ctx context.Context, snapshot Snapshot, opts Validat
 	if err != nil {
 		return ValidationResult{}, err
 	}
+	typecheckParsed := parsed
+	typecheckParseDiagnostics := parseDiagnostics
+	selectedFiles := pathSet(files)
+	if hasValidationKind(kinds, ValidationTypecheck) && !opts.Scope.IncludeGenerated {
+		typecheckScope := opts.Scope
+		typecheckScope.IncludeGenerated = true
+		typecheckFiles, err := goFiles(ctx, snapshot, typecheckScope)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		typecheckParsed, typecheckParseDiagnostics, err = parseValidationFiles(ctx, snapshot, typecheckFiles)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+	}
 	for _, kind := range kinds {
 		switch kind {
 		case ValidationParse:
 			result.Diagnostics = append(result.Diagnostics, parseDiagnostics...)
 		case ValidationTypecheck:
 			result.ResolutionMode = "typecheck"
-			if len(parseDiagnostics) > 0 {
-				result.Diagnostics = append(result.Diagnostics, parseDiagnostics...)
+			if diagnostics, ok, err := packageLoaderTypecheckDiagnostics(ctx, snapshot, opts.Scope, selectedFiles); err != nil {
+				return ValidationResult{}, err
+			} else if ok {
+				result.Diagnostics = append(result.Diagnostics, diagnostics...)
+				continue
+			}
+			if len(typecheckParseDiagnostics) > 0 {
+				result.Diagnostics = append(result.Diagnostics, filterDiagnosticsByPaths(typecheckParseDiagnostics, selectedFiles)...)
 				continue
 			}
 			modulePath, err := readModulePath(ctx, snapshot)
 			if err != nil {
 				return ValidationResult{}, err
 			}
-			result.Diagnostics = append(result.Diagnostics, typecheckDiagnostics(parsed, modulePath)...)
+			diagnostics := typecheckDiagnostics(typecheckParsed, modulePath)
+			if !opts.Scope.IncludeGenerated {
+				diagnostics = filterDiagnosticsByPaths(diagnostics, selectedFiles)
+			}
+			result.Diagnostics = append(result.Diagnostics, diagnostics...)
 		default:
 			result.Complete = false
 			result.Diagnostics = append(result.Diagnostics, Diagnostic{Severity: "warning", Message: fmt.Sprintf("unsupported Go validation kind %q", kind)})
@@ -59,6 +87,117 @@ func (b GoBackend) Validate(ctx context.Context, snapshot Snapshot, opts Validat
 	}
 	sort.Strings(result.AffectedPaths)
 	return result, nil
+}
+
+type workspaceRootSnapshot interface {
+	WorkspaceRoot() string
+}
+
+func packageLoaderTypecheckDiagnostics(ctx context.Context, snapshot Snapshot, scope Scope, selectedFiles map[string]bool) ([]Diagnostic, bool, error) {
+	rooter, ok := snapshot.(workspaceRootSnapshot)
+	if !ok {
+		return nil, false, nil
+	}
+	root := strings.TrimSpace(rooter.WorkspaceRoot())
+	if root == "" {
+		return nil, false, nil
+	}
+	cfg := &packages.Config{
+		Context: ctx,
+		Dir:     root,
+		Tests:   scope.IncludeTests,
+		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedTypes,
+	}
+	pkgs, err := packages.Load(cfg, "./...")
+	if err != nil {
+		return nil, false, err
+	}
+	var out []Diagnostic
+	for _, pkg := range pkgs {
+		for _, err := range pkg.Errors {
+			diag := packageErrorDiagnostic(err, root)
+			if diagnosticSelected(diag, selectedFiles) {
+				out = append(out, diag)
+			}
+		}
+	}
+	return dedupeDiagnostics(out), true, nil
+}
+
+func packageErrorDiagnostic(err packages.Error, root string) Diagnostic {
+	pos := parsePackageErrorPosition(err.Pos, root)
+	return Diagnostic{
+		Severity: "error",
+		Message:  err.Msg,
+		Location: Location{
+			URI: pos.Filename,
+			Range: Range{
+				Start: Position{Line: pos.Line, Column: pos.Column},
+				End:   Position{Line: pos.Line, Column: pos.Column},
+			},
+		},
+	}
+}
+
+func parsePackageErrorPosition(pos, root string) token.Position {
+	if pos == "" || pos == "-" {
+		return token.Position{}
+	}
+	file := pos
+	line := 0
+	column := 0
+	if i := strings.LastIndexByte(file, ':'); i >= 0 {
+		if n, err := strconv.Atoi(file[i+1:]); err == nil {
+			column = n
+			file = file[:i]
+		}
+	}
+	if i := strings.LastIndexByte(file, ':'); i >= 0 {
+		if n, err := strconv.Atoi(file[i+1:]); err == nil {
+			line = n
+			file = file[:i]
+		}
+	}
+	if filepath.IsAbs(file) {
+		if rel, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(rel, "..") {
+			file = rel
+		}
+	}
+	return token.Position{Filename: core.CleanPath(filepath.ToSlash(file)), Line: line, Column: column}
+}
+
+func diagnosticSelected(diagnostic Diagnostic, selected map[string]bool) bool {
+	if diagnostic.Location.URI == "" {
+		return true
+	}
+	return selected[core.CleanPath(diagnostic.Location.URI)]
+}
+
+func hasValidationKind(kinds []ValidationKind, want ValidationKind) bool {
+	for _, kind := range kinds {
+		if kind == want {
+			return true
+		}
+	}
+	return false
+}
+
+func pathSet(paths []string) map[string]bool {
+	out := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		out[core.CleanPath(p)] = true
+	}
+	return out
+}
+
+func filterDiagnosticsByPaths(in []Diagnostic, allowed map[string]bool) []Diagnostic {
+	out := make([]Diagnostic, 0, len(in))
+	for _, diagnostic := range in {
+		if diagnosticSelected(diagnostic, allowed) {
+			out = append(out, diagnostic)
+		}
+	}
+	return out
 }
 
 func validationKinds(kinds []ValidationKind) []ValidationKind {
@@ -183,12 +322,12 @@ type validationPackage struct {
 
 func typecheckDiagnostics(files []validationFile, modulePath string) []Diagnostic {
 	packages := validationPackages(files, modulePath)
-	externalImports := externalImportPaths(files, modulePath)
-	externalAliases := externalImportAliases(files, modulePath)
+	external := externalImportContext(files, modulePath)
 	importer := &validationImporter{
 		packages:        packages,
-		externalImports: externalImports,
-		externalAliases: externalAliases,
+		externalImports: external.paths,
+		externalAliases: external.aliases,
+		externalUses:    external.selectorUses,
 		std:             importer.Default(),
 		checked:         map[string]*types.Package{},
 		checking:        map[string]bool{},
@@ -256,6 +395,7 @@ type validationImporter struct {
 	packages        map[string]validationPackage
 	externalImports map[string]bool
 	externalAliases map[string]bool
+	externalUses    map[string]map[string]bool
 	std             types.Importer
 	checked         map[string]*types.Package
 	checking        map[string]bool
@@ -308,7 +448,7 @@ func (i *validationImporter) check(unit string) *types.Package {
 	cfg := types.Config{
 		Importer: i,
 		Error: func(err error) {
-			if ignoredExternalTypeError(err, i.externalAliases) {
+			if ignoredExternalTypeError(err, i.externalImports, i.externalAliases, i.externalUses) {
 				return
 			}
 			collected++
@@ -316,7 +456,7 @@ func (i *validationImporter) check(unit string) *types.Package {
 		},
 	}
 	pkg, err := cfg.Check(pkgInfo.importPath, fset, asts, nil)
-	if err != nil && collected == 0 && !ignoredExternalTypeError(err, i.externalAliases) {
+	if err != nil && collected == 0 && !ignoredExternalTypeError(err, i.externalImports, i.externalAliases, i.externalUses) {
 		i.diagnostics = append(i.diagnostics, typeErrorDiagnostic(err))
 	}
 	if pkg == nil {
@@ -326,34 +466,51 @@ func (i *validationImporter) check(unit string) *types.Package {
 	return pkg
 }
 
-func externalImportPaths(files []validationFile, modulePath string) map[string]bool {
-	out := map[string]bool{}
+type validationExternalImports struct {
+	paths        map[string]bool
+	aliases      map[string]bool
+	selectorUses map[string]map[string]bool
+}
+
+func externalImportContext(files []validationFile, modulePath string) validationExternalImports {
+	out := validationExternalImports{
+		paths:        map[string]bool{},
+		aliases:      map[string]bool{},
+		selectorUses: map[string]map[string]bool{},
+	}
 	for _, vf := range files {
+		hasExternal := false
 		for _, imp := range vf.file.Imports {
 			importPath := strings.Trim(imp.Path.Value, `"`)
 			if isExternalModuleImport(importPath, modulePath) {
-				out[importPath] = true
+				hasExternal = true
+				out.paths[importPath] = true
+				alias := importAlias(imp)
+				local := importLocalName(importPath, alias)
+				if local != "" {
+					out.aliases[local] = true
+				}
 			}
+		}
+		if hasExternal {
+			out.selectorUses[vf.path] = fileSelectorQualifierUses(vf.file)
 		}
 	}
 	return out
 }
 
-func externalImportAliases(files []validationFile, modulePath string) map[string]bool {
+func fileSelectorQualifierUses(file *ast.File) map[string]bool {
 	out := map[string]bool{}
-	for _, vf := range files {
-		for _, imp := range vf.file.Imports {
-			importPath := strings.Trim(imp.Path.Value, `"`)
-			if !isExternalModuleImport(importPath, modulePath) {
-				continue
-			}
-			alias := importAlias(imp)
-			local := importLocalName(importPath, alias)
-			if local != "" {
-				out[local] = true
-			}
+	ast.Inspect(file, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
 		}
-	}
+		if ident, ok := selector.X.(*ast.Ident); ok {
+			out[ident.Name] = true
+		}
+		return true
+	})
 	return out
 }
 
@@ -368,10 +525,15 @@ func isExternalModuleImport(importPath, modulePath string) bool {
 	return strings.Contains(first, ".")
 }
 
-func ignoredExternalTypeError(err error, aliases map[string]bool) bool {
+func ignoredExternalTypeError(err error, paths, aliases map[string]bool, selectorUses map[string]map[string]bool) bool {
 	te, ok := err.(types.Error)
 	if !ok {
 		return false
+	}
+	for path := range paths {
+		if strings.Contains(te.Msg, strconv.Quote(path)) && strings.Contains(te.Msg, "imported") && strings.Contains(te.Msg, "not used") {
+			return true
+		}
 	}
 	const prefix = "undefined: "
 	if !strings.HasPrefix(te.Msg, prefix) {
@@ -382,6 +544,13 @@ func ignoredExternalTypeError(err error, aliases map[string]bool) bool {
 		if name == alias || strings.HasPrefix(name, alias+".") {
 			return true
 		}
+	}
+	if dot := strings.IndexByte(name, '.'); dot >= 0 {
+		name = name[:dot]
+	}
+	file := core.CleanPath(te.Fset.Position(te.Pos).Filename)
+	if selectorUses[file][name] {
+		return true
 	}
 	return false
 }

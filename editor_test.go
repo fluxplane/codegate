@@ -1706,7 +1706,7 @@ func Target() {}
 `,
 	})
 	changes := ed.NewChangeSet()
-	err := changes.Apply(ctx, DeleteFunction{Target: SymbolSelector{Name: "Target", Kind: SymbolFunction}})
+	err := changes.Apply(ctx, EnsureGoImport{Path: "generated.go", ImportPath: "fmt"})
 	if err == nil {
 		t.Fatal("expected generated-file refactor to fail")
 	}

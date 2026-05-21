@@ -37,6 +37,9 @@ func goFiles(ctx context.Context, snapshot Snapshot, scope Scope) ([]string, err
 		if !goBuildConstraintsMatch(src) {
 			continue
 		}
+		if !scope.IncludeGenerated && isGeneratedGoSource(src) {
+			continue
+		}
 		out = append(out, p)
 	}
 	sort.Strings(out)
