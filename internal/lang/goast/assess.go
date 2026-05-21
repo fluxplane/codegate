@@ -17,7 +17,7 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 	}
 	validation, err := b.Validate(ctx, snapshot, ValidationOptions{
 		Scope: scope,
-		Kinds: []ValidationKind{ValidationParse, ValidationTypecheck},
+		Kinds: assessmentValidationKinds(opts),
 	})
 	if err != nil {
 		return AssessmentReport{}, err
@@ -339,6 +339,13 @@ func assessmentGateEnabled(opts AssessmentOptions, gate AssessmentGate) bool {
 		}
 	}
 	return false
+}
+
+func assessmentValidationKinds(opts AssessmentOptions) []ValidationKind {
+	if assessmentGateEnabled(opts, AssessmentGateSafety) {
+		return []ValidationKind{ValidationParse, ValidationTypecheck}
+	}
+	return []ValidationKind{ValidationParse}
 }
 
 func normalizedAssessmentGates(gates []AssessmentGate) []AssessmentGate {

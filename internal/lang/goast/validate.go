@@ -80,28 +80,6 @@ func validationKinds(kinds []ValidationKind) []ValidationKind {
 	return out
 }
 
-func goFiles(ctx context.Context, snapshot Snapshot, scope Scope) ([]string, error) {
-	if scope.Language != "" && scope.Language != Go {
-		return nil, nil
-	}
-	files, err := snapshot.ListFiles(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(files))
-	for _, p := range files {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if !strings.HasSuffix(p, ".go") || (!scope.IncludeTests && core.HasTestPath(p)) {
-			continue
-		}
-		out = append(out, core.CleanPath(p))
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
 type validationFile struct {
 	path string
 	src  []byte

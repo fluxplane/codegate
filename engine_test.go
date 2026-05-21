@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 
@@ -195,6 +196,105 @@ func TestEngineAssessReportsValidationViolations(t *testing.T) {
 	}
 	if report.Validation.Passed || !hasViolation(report, "safety_validation_diagnostic") {
 		t.Fatalf("expected validation violation, got %#v", report)
+	}
+}
+
+func TestEngineAssessArchitectureGateUsesParseValidationOnly(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", `package demo
+
+func WrongType() int {
+	return "not an int"
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	architectureReport, err := eng.Assess(context.Background(), AssessmentOptions{Gates: []AssessmentGate{AssessmentGateArchitecture}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !architectureReport.Validation.Passed || architectureReport.Validation.ResolutionMode != "ast" || hasViolation(architectureReport, "safety_validation_diagnostic") {
+		t.Fatalf("expected architecture gate to use parse validation only, got %#v", architectureReport)
+	}
+
+	safetyReport, err := eng.Assess(context.Background(), AssessmentOptions{Gates: []AssessmentGate{AssessmentGateSafety}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if safetyReport.Validation.Passed || safetyReport.Validation.ResolutionMode != "typecheck" || !hasViolation(safetyReport, "safety_validation_diagnostic") {
+		t.Fatalf("expected safety gate to include typecheck diagnostics, got %#v", safetyReport)
+	}
+}
+
+func TestEngineGoBuildConstraintsSelectActiveFiles(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "active.go", `package demo
+
+func Active() string {
+	return activePlatform()
+}
+`)
+	writeEngineFile(t, root, "active_"+runtime.GOOS+".go", `package demo
+
+func activePlatform() string {
+	return "active"
+}
+`)
+	writeEngineFile(t, root, "inactive_"+inactiveGOOS()+".go", `package demo
+
+func brokenPlatform( {
+`)
+	writeEngineFile(t, root, "tagged_out.go", `//go:build codegate_missing_tag
+
+package demo
+
+func brokenTagged( {
+`)
+	writeEngineFile(t, root, "legacy_tagged_out.go", `// +build codegate_missing_tag
+
+package demo
+
+func brokenLegacyTagged( {
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	validation, err := eng.Validate(context.Background(), ValidationOptions{Kinds: []ValidationKind{ValidationParse, ValidationTypecheck}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Passed {
+		t.Fatalf("expected inactive build files to be skipped, got %#v", validation)
+	}
+
+	lookup, err := eng.Lookup(context.Background(), LookupQuery{Name: "Active", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lookup.Symbols) != 1 {
+		t.Fatalf("expected active symbol lookup, got %#v", lookup)
+	}
+	inactiveLookup, err := eng.Lookup(context.Background(), LookupQuery{Name: "brokenTagged", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inactiveLookup.Symbols) != 0 {
+		t.Fatalf("expected build-tagged file to be absent from index, got %#v", inactiveLookup.Symbols)
 	}
 }
 
@@ -604,6 +704,13 @@ func hasCapability(spec BackendSpec, capability Capability, level CapabilityLeve
 		}
 	}
 	return false
+}
+
+func inactiveGOOS() string {
+	if runtime.GOOS == "windows" {
+		return "linux"
+	}
+	return "windows"
 }
 
 func agentruntimeStyleArchitectureRules() *ArchitectureRules {

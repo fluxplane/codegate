@@ -78,7 +78,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 			fileUnits: map[string]string{},
 		}, nil
 	}
-	files, err := snapshot.ListFiles(ctx, scope)
+	files, err := goFiles(ctx, snapshot, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -93,9 +93,6 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 	for _, p := range files {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		}
-		if !strings.HasSuffix(p, ".go") || (!scope.IncludeTests && core.HasTestPath(p)) {
-			continue
 		}
 		src, err := snapshot.ReadFile(ctx, p)
 		if err != nil {
