@@ -129,6 +129,46 @@ func Complex(a, b, c, d, e, f int) int {
 	}
 }
 
+func TestCodegateAssessSummaryOnly(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", `package demo
+
+func Complex(a, b, c, d, e, f int) int {
+	if a > 0 {
+		if b > 0 {
+			if c > 0 {
+				if d > 0 {
+					if e > 0 {
+						return 1
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+`)
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "maintainability", "--summary-only"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{`"summary"`, `"scores"`, `"metrics"`, `"finding_counts"`, `"finding_category_counts"`, `"suggestions"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %s in summary-only output:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"findings": [`) || strings.Contains(got, `"evidence"`) || strings.Contains(got, `"top_units"`) {
+		t.Fatalf("summary-only output should not include full evidence arrays:\n%s", got)
+	}
+}
+
 func TestCodegateMarkdownCycleApplyFirst(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "README.md", `Intro text.
@@ -416,7 +456,7 @@ func TestCodegateCapabilitiesMetricsFilter(t *testing.T) {
 	if !strings.Contains(got, `"language": "go"`) || strings.Contains(got, `"language": "markdown"`) {
 		t.Fatalf("expected language-filtered capabilities output:\n%s", got)
 	}
-	if !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"doc_coverage_percent"`) || !strings.Contains(got, `"test_to_code_ratio"`) || !strings.Contains(got, `"ignored_error_count"`) || strings.Contains(got, `"findings"`) || strings.Contains(got, `"capabilities"`) {
+	if !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"doc_coverage_percent"`) || !strings.Contains(got, `"test_to_code_ratio"`) || !strings.Contains(got, `"ignored_error_count"`) || !strings.Contains(got, `"dynamic_exec_count"`) || strings.Contains(got, `"findings"`) || strings.Contains(got, `"capabilities"`) {
 		t.Fatalf("unexpected metric-filtered capabilities output:\n%s", got)
 	}
 }

@@ -176,7 +176,7 @@ func goQualityFindings(idx *index, opts AssessmentOptions) []Finding {
 			if maintainability {
 				out = append(out, finding)
 			}
-		case strings.HasPrefix(finding.Kind, "safety_"):
+		case strings.HasPrefix(finding.Kind, "safety_") || strings.HasPrefix(finding.Kind, "security_"):
 			if safety {
 				out = append(out, finding)
 			}
@@ -338,7 +338,7 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 	}
 	debtMarkers := countFindings(findings, "maintainability_debt_marker")
 	qualityFindings := countFindings(findings, "quality_") + countFindings(findings, "performance_")
-	safetyFindings := countFindings(findings, "safety_")
+	safetyFindings := countFindings(findings, "safety_") + countFindings(findings, "security_")
 	maintainability := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100)) - minAssessmentInt(20, debtMarkers*2) - minAssessmentInt(25, qualityFindings*3)
 	if maintainability < 50 {
 		maintainability = 50

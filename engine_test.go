@@ -87,7 +87,7 @@ func TestEngineCapabilities(t *testing.T) {
 	if !hasOperation(specs[1].Operations.EditOperations, OpMarkdownEnsureH1) || hasOperation(specs[1].Operations.ValidationKinds, ValidationTypecheck) {
 		t.Fatalf("markdown backend did not declare expected operation detail: %#v", specs[1].Operations)
 	}
-	if !hasMetricSupport(specs[0], "max_cyclomatic_complexity") || !hasMetricSupport(specs[0], "ignored_error_count") || !hasFindingSupport(specs[0], "quality_high_complexity_function") {
+	if !hasMetricSupport(specs[0], "max_cyclomatic_complexity") || !hasMetricSupport(specs[0], "ignored_error_count") || !hasMetricSupport(specs[0], "dynamic_exec_count") || !hasFindingSupport(specs[0], "quality_high_complexity_function") || !hasFindingSupport(specs[0], "security_dynamic_exec") {
 		t.Fatalf("go backend did not declare expected assessment support: %#v", specs[0].Operations.Assessment)
 	}
 	if !hasMetricSupport(specs[1], "debt_marker_count") || !hasFindingSupport(specs[1], "markdown_broken_local_heading_link") {
@@ -538,6 +538,290 @@ func Smells(v interface{}) {
 	}
 	if report.Scores.SideEffect >= 100 {
 		t.Fatalf("expected safety findings to affect side-effect score, got %#v", report.Scores)
+	}
+}
+
+func TestEngineAssessReportsGoSecurityMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "security.go", `package demo
+
+import (
+	"crypto/md5"
+	"database/sql"
+	"os"
+	"os/exec"
+	"unsafe"
+)
+
+func Risk(db *sql.DB, cmd, name string) {
+	_ = md5.Sum(nil)
+	_ = exec.Command(cmd, "status")
+	_, _ = db.Query("select * from " + name)
+	_, _ = os.Open(name)
+	var p unsafe.Pointer
+	_ = p
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{
+		"security_unsafe_usage",
+		"security_weak_crypto",
+		"security_dynamic_exec",
+		"security_sql_concat",
+		"security_dynamic_file_path",
+	} {
+		if !hasFinding(report, kind) {
+			t.Fatalf("expected %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["unsafe_usage_count"] != 1 || report.Metrics["weak_crypto_count"] != 1 || report.Metrics["dynamic_exec_count"] != 1 || report.Metrics["sql_concat_count"] != 1 || report.Metrics["path_risk_count"] != 1 {
+		t.Fatalf("unexpected security metrics: %#v", report.Metrics)
+	}
+	if report.Scores.SideEffect >= 100 {
+		t.Fatalf("expected security findings to affect side-effect score, got %#v", report.Scores)
+	}
+}
+
+func TestEngineAssessIgnoresCommonSafeSecurityPatterns(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "security.go", `package demo
+
+import (
+	"database/sql"
+	"os"
+	"os/exec"
+)
+
+func Safe(db *sql.DB, id int) {
+	_ = exec.Command("git", "status")
+	_, _ = db.Query("select * from users where id = ?", id)
+	_, _ = os.Open("safe.txt")
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"security_dynamic_exec", "security_sql_concat", "security_dynamic_file_path"} {
+		if hasFinding(report, kind) {
+			t.Fatalf("did not expect %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["dynamic_exec_count"] != 0 || report.Metrics["sql_concat_count"] != 0 || report.Metrics["path_risk_count"] != 0 {
+		t.Fatalf("unexpected safe security metrics: %#v", report.Metrics)
+	}
+}
+
+func TestEngineAssessReportsGoPerformanceMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "performance.go", `package demo
+
+import "reflect"
+
+type Big struct {
+	F01 int
+	F02 int
+	F03 int
+	F04 int
+	F05 int
+	F06 int
+	F07 int
+	F08 int
+	F09 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+}
+
+func Perf(xs []int) []int {
+	_ = reflect.TypeOf(xs)
+	var out []int
+	for _, x := range xs {
+		out = append(out, x)
+	}
+	for _, item := range []Big{{}} {
+		_ = item
+	}
+	return out
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"performance_reflect_usage", "performance_missing_capacity", "performance_large_range_copy"} {
+		if !hasFinding(report, kind) {
+			t.Fatalf("expected %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["reflect_usage_count"] != 1 || report.Metrics["missing_capacity_count"] != 1 || report.Metrics["large_range_copy_count"] != 1 {
+		t.Fatalf("unexpected performance metrics: %#v", report.Metrics)
+	}
+}
+
+func TestEngineAssessReportsMissingCapacityForLenBoundLoop(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "performance.go", `package demo
+
+func Perf(xs []int) []int {
+	var out []int
+	for i := 0; i < len(xs); i++ {
+		out = append(out, xs[i])
+	}
+	return out
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["missing_capacity_count"] != 1 {
+		t.Fatalf("expected len-bound loop append to be flagged, got %#v", report.Metrics)
+	}
+	if !hasFinding(report, "performance_missing_capacity") {
+		t.Fatalf("expected missing-capacity finding, got %#v", report.Findings)
+	}
+}
+
+func TestEngineAssessIgnoresPreallocatedAppend(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "performance.go", `package demo
+
+func Perf(xs []int) []int {
+	out := make([]int, 0, len(xs))
+	for _, x := range xs {
+		out = append(out, x)
+	}
+	return out
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["missing_capacity_count"] != 0 {
+		t.Fatalf("expected preallocated append to be ignored, got %#v", report.Metrics)
+	}
+	if hasFinding(report, "performance_missing_capacity") {
+		t.Fatalf("did not expect missing-capacity finding, got %#v", report.Findings)
+	}
+}
+
+func TestEngineAssessIgnoresAppendWithoutObviousCapacitySource(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "performance.go", `package demo
+
+func Perf(next func() (int, bool)) []int {
+	var out []int
+	for {
+		x, ok := next()
+		if !ok {
+			break
+		}
+		out = append(out, x)
+	}
+	return out
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["missing_capacity_count"] != 0 {
+		t.Fatalf("expected append without obvious capacity source to be ignored, got %#v", report.Metrics)
+	}
+	if hasFinding(report, "performance_missing_capacity") {
+		t.Fatalf("did not expect missing-capacity finding, got %#v", report.Findings)
 	}
 }
 

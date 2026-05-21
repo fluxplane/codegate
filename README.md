@@ -87,7 +87,7 @@ fmt.Println(report.Summary.Score)
 
 Reports include scores, findings, violations, diagnostics, top units, and suggestions. They are designed to be consumed by LLMs, CI bots, and review automation.
 
-For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, package/API shape, doc coverage, weak names, testability ratios, generated-code ratio, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, and string concatenation in loops. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `doc_coverage_percent`, `test_to_code_ratio`, `large_function_count`, and `ignored_error_count`.
+For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, package/API shape, doc coverage, weak names, testability ratios, generated-code ratio, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, string concatenation in loops, unsafe/weak-crypto usage, dynamic process execution, composed SQL queries, dynamic file paths, reflection, obvious slice preallocation opportunities, and large range copies. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `doc_coverage_percent`, `test_to_code_ratio`, `ignored_error_count`, `dynamic_exec_count`, and `missing_capacity_count`.
 
 Maintainability assessment also counts source debt markers in comments and prose. `TODO`, `FIXME`, `HACK`, `XXX`, and `DEPRECATED` markers appear as `maintainability_debt_marker` findings, with aggregate `debt_marker_count` and `debt_marker_counts` metrics. These produce advisory review suggestions only; codegate does not remove or rewrite intent-bearing notes automatically.
 
@@ -179,6 +179,7 @@ The `cmd/codegate` CLI exposes the same engine loop as JSON-first commands:
 go run ./cmd/codegate --root . --language go capabilities
 go run ./cmd/codegate --root . --language go lookup --name Target --kind function
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
+go run ./cmd/codegate --root . --language go assess --gate all --summary-only
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
 go run ./cmd/codegate --root . --language go suggest --executable
@@ -188,6 +189,8 @@ go run ./cmd/codegate --root . --language markdown cycle --apply-first
 ```
 
 `assess --fail-on` prints the normal JSON report first, then exits non-zero if a selected category has an unallowed violation. Supported categories are `boundary`, `test-boundary`, `effects`, `unknown`, and `all`.
+
+Use `assess --summary-only` when an agent needs scores, compact metrics, and finding counts without full evidence payloads.
 
 Use `cycle --apply-first` only when you want the first executable suggestion applied to an in-memory change set and returned as a diff.
 
@@ -236,7 +239,7 @@ engine, err := codegate.New().
 
 `Capabilities()` and `codegate capabilities` report both coarse backend capability levels and operation-level support. Agents can use this to choose safe calls without guessing which language supports which validation modes or edit operations.
 
-Capability output also lists exact assessment support per language: gates, metric IDs, finding kinds, and violation kinds. Metric concepts are generic public strings, but support is declared per backend. For example, Go currently reports metrics such as `max_cyclomatic_complexity` and `ignored_error_count`, while Markdown reports structural documentation signals and debt marker counts.
+Capability output also lists exact assessment support per language: gates, metric IDs, finding kinds, and violation kinds. Metric concepts are generic public strings, but support is declared per backend. For example, Go currently reports metrics such as `max_cyclomatic_complexity`, `ignored_error_count`, and `dynamic_exec_count`, while Markdown reports structural documentation signals and debt marker counts.
 
 Built-in backends:
 

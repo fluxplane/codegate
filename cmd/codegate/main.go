@@ -53,6 +53,24 @@ type cycleResult struct {
 	Message    string                         `json:"message,omitempty"`
 }
 
+type compactAssessmentReport struct {
+	Root                  string                     `json:"root"`
+	Language              string                     `json:"language"`
+	Summary               codegate.AssessmentSummary `json:"summary"`
+	Scores                codegate.ScoreSet          `json:"scores"`
+	Validation            codegate.ValidationSummary `json:"validation"`
+	Metrics               map[string]interface{}     `json:"metrics,omitempty"`
+	FindingCounts         map[string]int             `json:"finding_counts,omitempty"`
+	FindingCategoryCounts map[string]int             `json:"finding_category_counts,omitempty"`
+	ViolationCounts       map[string]int             `json:"violation_counts,omitempty"`
+	Suggestions           compactSuggestionSummary   `json:"suggestions"`
+}
+
+type compactSuggestionSummary struct {
+	Total      int `json:"total"`
+	Executable int `json:"executable"`
+}
+
 func main() {
 	a := &app{out: os.Stdout, err: os.Stderr}
 	if err := a.rootCommand().Execute(); err != nil {
@@ -161,6 +179,7 @@ func (a *app) assessCommand() *cobra.Command {
 	var gates []string
 	var rulesPath string
 	var failOn []string
+	var summaryOnly bool
 	cmd := &cobra.Command{
 		Use:   "assess",
 		Short: "Create an agent-readable quality assessment",
@@ -177,7 +196,11 @@ func (a *app) assessCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.print(report); err != nil {
+			var output interface{} = report
+			if summaryOnly {
+				output = summarizeAssessmentReport(report)
+			}
+			if err := a.print(output); err != nil {
 				return err
 			}
 			categories, err := parseAssessmentFailureCategories(failOn)
@@ -194,6 +217,7 @@ func (a *app) assessCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&gates, "gate", []string{"all"}, "assessment gate: architecture, maintainability, safety, coverage, or all")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "architecture rules JSON file")
 	cmd.Flags().StringSliceVar(&failOn, "fail-on", nil, "comma-separated failure categories: boundary, test-boundary, effects, unknown, or all")
+	cmd.Flags().BoolVar(&summaryOnly, "summary-only", false, "print compact assessment summary without full finding evidence")
 	return cmd
 }
 
@@ -346,6 +370,92 @@ func (a *app) assess(ctx context.Context, limit int, gates []codegate.Assessment
 		return codegate.AssessmentReport{}, err
 	}
 	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates, Architecture: rules})
+}
+
+func summarizeAssessmentReport(report codegate.AssessmentReport) compactAssessmentReport {
+	return compactAssessmentReport{
+		Root:                  report.Root,
+		Language:              report.Language,
+		Summary:               report.Summary,
+		Scores:                report.Scores,
+		Validation:            report.Validation,
+		Metrics:               compactAssessmentMetrics(report.Metrics),
+		FindingCounts:         findingCounts(report.Findings),
+		FindingCategoryCounts: findingCategoryCounts(report.Findings),
+		ViolationCounts:       violationCounts(report.Violations),
+		Suggestions: compactSuggestionSummary{
+			Total:      report.Summary.Suggestions,
+			Executable: report.Summary.ExecutableFixes,
+		},
+	}
+}
+
+func compactAssessmentMetrics(metrics map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for key, value := range metrics {
+		switch value.(type) {
+		case map[string]int, map[string]interface{}:
+			continue
+		default:
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func findingCounts(findings []codegate.Finding) map[string]int {
+	out := map[string]int{}
+	for _, finding := range findings {
+		out[finding.Kind]++
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func findingCategoryCounts(findings []codegate.Finding) map[string]int {
+	out := map[string]int{}
+	for _, finding := range findings {
+		out[findingCategory(finding.Kind)]++
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func findingCategory(kind string) string {
+	switch {
+	case strings.HasPrefix(kind, "architecture_"):
+		return "architecture"
+	case strings.HasPrefix(kind, "coverage_"):
+		return "coverage"
+	case strings.HasPrefix(kind, "performance_"):
+		return "performance"
+	case strings.HasPrefix(kind, "quality_"), strings.HasPrefix(kind, "maintainability_"):
+		return "maintainability"
+	case strings.HasPrefix(kind, "safety_"):
+		return "safety"
+	case strings.HasPrefix(kind, "security_"):
+		return "security"
+	default:
+		return "other"
+	}
+}
+
+func violationCounts(violations []codegate.Violation) map[string]int {
+	out := map[string]int{}
+	for _, violation := range violations {
+		out[violation.Kind]++
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func filterCapabilitySpecs(specs []codegate.BackendSpec, language codegate.LanguageID, filterLanguage bool, metricsOnly bool) []codegate.BackendSpec {

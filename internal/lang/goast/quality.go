@@ -56,6 +56,14 @@ type goQualityMetrics struct {
 	DeferInLoopCount            int
 	ProcessExitCount            int
 	StringConcatInLoopCount     int
+	UnsafeUsageCount            int
+	WeakCryptoCount             int
+	DynamicExecCount            int
+	SQLConcatCount              int
+	PathRiskCount               int
+	ReflectUsageCount           int
+	MissingCapacityCount        int
+	LargeRangeCopyCount         int
 	PackageLOC                  map[string]int
 	PackageFileCount            map[string]int
 }
@@ -96,6 +104,14 @@ func (r *goQualityReport) merge(next goQualityReport) {
 	r.metrics.DeferInLoopCount += next.metrics.DeferInLoopCount
 	r.metrics.ProcessExitCount += next.metrics.ProcessExitCount
 	r.metrics.StringConcatInLoopCount += next.metrics.StringConcatInLoopCount
+	r.metrics.UnsafeUsageCount += next.metrics.UnsafeUsageCount
+	r.metrics.WeakCryptoCount += next.metrics.WeakCryptoCount
+	r.metrics.DynamicExecCount += next.metrics.DynamicExecCount
+	r.metrics.SQLConcatCount += next.metrics.SQLConcatCount
+	r.metrics.PathRiskCount += next.metrics.PathRiskCount
+	r.metrics.ReflectUsageCount += next.metrics.ReflectUsageCount
+	r.metrics.MissingCapacityCount += next.metrics.MissingCapacityCount
+	r.metrics.LargeRangeCopyCount += next.metrics.LargeRangeCopyCount
 	mergeBoolMaps(&r.metrics.WeakPackageUnits, next.metrics.WeakPackageUnits)
 	mergeIntMaps(&r.metrics.PackageLOC, next.metrics.PackageLOC)
 	mergeIntMaps(&r.metrics.PackageFileCount, next.metrics.PackageFileCount)
@@ -212,6 +228,14 @@ func (m goQualityMetrics) assessmentMetrics() map[string]interface{} {
 		"defer_in_loop_count":            m.DeferInLoopCount,
 		"process_exit_count":             m.ProcessExitCount,
 		"string_concat_in_loop_count":    m.StringConcatInLoopCount,
+		"unsafe_usage_count":             m.UnsafeUsageCount,
+		"weak_crypto_count":              m.WeakCryptoCount,
+		"dynamic_exec_count":             m.DynamicExecCount,
+		"sql_concat_count":               m.SQLConcatCount,
+		"path_risk_count":                m.PathRiskCount,
+		"reflect_usage_count":            m.ReflectUsageCount,
+		"missing_capacity_count":         m.MissingCapacityCount,
+		"large_range_copy_count":         m.LargeRangeCopyCount,
 	}
 }
 
@@ -220,28 +244,34 @@ func collectGoQuality(pf parsedFile) goQualityReport {
 		return goQualityReport{}
 	}
 	collector := goQualityCollector{
-		pf:          pf,
-		commentLine: commentLineSet(pf.fset, pf.file),
-		imports:     importAliases(pf.file),
-		generated:   isGeneratedGoSource(pf.src),
-		testFile:    isGoTestPath(pf.path),
+		pf:           pf,
+		commentLine:  commentLineSet(pf.fset, pf.file),
+		imports:      importAliases(pf.file),
+		structFields: structFieldCounts(pf.file),
+		generated:    isGeneratedGoSource(pf.src),
+		testFile:     isGoTestPath(pf.path),
 	}
 	collector.collectFile()
 	if collector.generated {
 		return collector.report
 	}
 	collector.collectDeclarations()
+	collector.collectImportSmells()
 	collector.collectFunctionSmells()
 	return collector.report
 }
 
 type goQualityCollector struct {
-	pf          parsedFile
-	commentLine map[int]bool
-	imports     map[string]string
-	generated   bool
-	testFile    bool
-	report      goQualityReport
+	pf                  parsedFile
+	commentLine         map[int]bool
+	imports             map[string]string
+	structFields        map[string]int
+	noCapSliceVars      map[string]bool
+	missingCapacitySeen map[string]bool
+	loopCapacitySources []string
+	generated           bool
+	testFile            bool
+	report              goQualityReport
 }
 
 func (c *goQualityCollector) collectFile() {
@@ -281,6 +311,30 @@ func (c *goQualityCollector) addPackageMetric(loc int) {
 	}
 	c.report.metrics.PackageLOC[c.pf.unit] += loc
 	c.report.metrics.PackageFileCount[c.pf.unit]++
+}
+
+func (c *goQualityCollector) collectImportSmells() {
+	for _, spec := range c.pf.file.Imports {
+		importPath := strings.Trim(spec.Path.Value, "\"")
+		loc := Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, spec.Pos(), spec.End())}
+		switch importPath {
+		case "unsafe":
+			c.report.metrics.UnsafeUsageCount++
+			c.addFinding("security_unsafe_usage", "warning", loc, "",
+				"Package imports unsafe; memory safety and pointer invariants need explicit review.",
+				map[string]float64{"count": 1})
+		case "reflect":
+			c.report.metrics.ReflectUsageCount++
+			c.addFinding("performance_reflect_usage", "info", loc, "",
+				"Package imports reflect; review whether reflection is needed on hot or agent-edited paths.",
+				map[string]float64{"count": 1})
+		case "crypto/md5", "crypto/sha1", "crypto/des", "crypto/rc4":
+			c.report.metrics.WeakCryptoCount++
+			c.addFinding("security_weak_crypto", "warning", loc, "",
+				fmt.Sprintf("Package imports %s, which is weak or legacy cryptography for security-sensitive use.", importPath),
+				map[string]float64{"count": 1})
+		}
+	}
 }
 
 func (c *goQualityCollector) collectDeclarations() {
@@ -483,8 +537,14 @@ func (c *goQualityCollector) collectFunctionSmells() {
 		if !ok || fn.Body == nil {
 			continue
 		}
+		c.noCapSliceVars = collectNoCapSliceVars(fn.Body)
+		c.missingCapacitySeen = map[string]bool{}
+		c.loopCapacitySources = nil
 		c.collectStmtSmells(fn.Body, 0)
 	}
+	c.noCapSliceVars = nil
+	c.missingCapacitySeen = nil
+	c.loopCapacitySources = nil
 }
 
 func (c *goQualityCollector) collectStmtSmells(stmt ast.Stmt, loopDepth int) {
@@ -512,10 +572,15 @@ func (c *goQualityCollector) collectStmtSmells(stmt ast.Stmt, loopDepth int) {
 		if x.Post != nil {
 			c.collectStmtSmells(x.Post, loopDepth)
 		}
+		c.pushLoopCapacitySource(forLoopCapacitySource(x))
 		c.collectStmtSmells(x.Body, loopDepth+1)
+		c.popLoopCapacitySource()
 	case *ast.RangeStmt:
 		c.collectExprSmells(x.X, loopDepth)
+		c.collectLargeRangeCopy(x)
+		c.pushLoopCapacitySource(rangeLoopCapacitySource(x))
 		c.collectStmtSmells(x.Body, loopDepth+1)
+		c.popLoopCapacitySource()
 	case *ast.SwitchStmt:
 		if x.Init != nil {
 			c.collectStmtSmells(x.Init, loopDepth)
@@ -599,6 +664,15 @@ func (c *goQualityCollector) collectAssignSmells(assign *ast.AssignStmt, loopDep
 			"Compound append-style assignment inside a loop may repeatedly allocate when used for strings.",
 			map[string]float64{"count": 1})
 	}
+	if loopDepth > 0 {
+		if target, source := appendTarget(assign), c.currentLoopCapacitySource(); target != "" && source != "" && c.noCapSliceVars[target] && !c.missingCapacitySeen[target] {
+			c.missingCapacitySeen[target] = true
+			c.report.metrics.MissingCapacityCount++
+			c.addFinding("performance_missing_capacity", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, assign.Pos(), assign.End())}, target,
+				fmt.Sprintf("Slice %s is appended to inside a loop with capacity source %s but no obvious capacity hint.", target, source),
+				map[string]float64{"count": 1, "capacity_source_detected": 1})
+		}
+	}
 	if hasBlankLHS(assign) && hasCallRHS(assign) {
 		c.report.metrics.IgnoredErrorCount++
 		c.addFinding("safety_ignored_error", "warning", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, assign.Pos(), assign.End())}, "",
@@ -622,6 +696,24 @@ func (c *goQualityCollector) collectExprSmells(expr ast.Expr, loopDepth int) {
 				c.report.metrics.ProcessExitCount++
 				c.addFinding("safety_process_exit", "warning", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Pos(), x.End())}, "",
 					"Process-level exit or panic bypasses normal error handling and cleanup.",
+					map[string]float64{"count": 1})
+			}
+			if c.isDynamicExecCall(x) {
+				c.report.metrics.DynamicExecCount++
+				c.addFinding("security_dynamic_exec", "warning", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Pos(), x.End())}, "",
+					"Process execution uses a dynamic command or argument; validate the source and quoting boundary.",
+					map[string]float64{"count": 1})
+			}
+			if c.isSQLConcatCall(x) {
+				c.report.metrics.SQLConcatCount++
+				c.addFinding("security_sql_concat", "warning", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Pos(), x.End())}, "",
+					"SQL execution appears to build the query with string composition instead of parameter binding.",
+					map[string]float64{"count": 1})
+			}
+			if c.isDynamicPathCall(x) {
+				c.report.metrics.PathRiskCount++
+				c.addFinding("security_dynamic_file_path", "warning", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Pos(), x.End())}, "",
+					"Filesystem access uses a dynamic path; validate traversal and trust boundaries.",
 					map[string]float64{"count": 1})
 			}
 			if c.testFile && c.isFlakyTestCall(x) {
@@ -666,6 +758,124 @@ func (c *goQualityCollector) isFlakyTestCall(call *ast.CallExpr) bool {
 	default:
 		return false
 	}
+}
+
+func (c *goQualityCollector) isDynamicExecCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || c.imports[exprName(selector.X)] != "os/exec" {
+		return false
+	}
+	argStart := 0
+	switch selector.Sel.Name {
+	case "Command":
+		argStart = 0
+	case "CommandContext":
+		argStart = 1
+	default:
+		return false
+	}
+	if len(call.Args) <= argStart {
+		return false
+	}
+	for _, arg := range call.Args[argStart:] {
+		if !isStringLiteral(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *goQualityCollector) isSQLConcatCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || len(call.Args) == 0 {
+		return false
+	}
+	switch selector.Sel.Name {
+	case "Exec", "ExecContext", "Query", "QueryContext", "QueryRow", "QueryRowContext":
+	default:
+		return false
+	}
+	queryArg := call.Args[0]
+	if strings.HasSuffix(selector.Sel.Name, "Context") {
+		if len(call.Args) < 2 {
+			return false
+		}
+		queryArg = call.Args[1]
+	}
+	return containsStringConcat(queryArg) || c.isFmtSprintf(queryArg)
+}
+
+func (c *goQualityCollector) isDynamicPathCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || len(call.Args) == 0 {
+		return false
+	}
+	importPath := c.imports[exprName(selector.X)]
+	argIndex := 0
+	switch importPath {
+	case "os":
+		switch selector.Sel.Name {
+		case "Open", "OpenFile", "ReadFile", "WriteFile", "Create", "Remove", "RemoveAll", "Mkdir", "MkdirAll":
+		default:
+			return false
+		}
+	case "path/filepath":
+		if selector.Sel.Name != "Join" {
+			return false
+		}
+		for _, arg := range call.Args {
+			if !isStringLiteral(arg) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+	return !isStringLiteral(call.Args[argIndex])
+}
+
+func (c *goQualityCollector) isFmtSprintf(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "Sprintf" && c.imports[exprName(selector.X)] == "fmt"
+}
+
+func (c *goQualityCollector) collectLargeRangeCopy(stmt *ast.RangeStmt) {
+	if ident, ok := stmt.Value.(*ast.Ident); ok && ident.Name == "_" {
+		return
+	}
+	structName := rangeCompositeStructName(stmt.X)
+	if structName == "" || c.structFields[structName] <= goStructFieldThreshold {
+		return
+	}
+	c.report.metrics.LargeRangeCopyCount++
+	c.addFinding("performance_large_range_copy", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, stmt.Pos(), stmt.End())}, structName,
+		fmt.Sprintf("Range copies values of large struct %s; consider ranging over pointers or indexes on hot paths.", structName),
+		map[string]float64{"fields": float64(c.structFields[structName]), "threshold": goStructFieldThreshold})
+}
+
+func (c *goQualityCollector) pushLoopCapacitySource(source string) {
+	c.loopCapacitySources = append(c.loopCapacitySources, source)
+}
+
+func (c *goQualityCollector) popLoopCapacitySource() {
+	if len(c.loopCapacitySources) == 0 {
+		return
+	}
+	c.loopCapacitySources = c.loopCapacitySources[:len(c.loopCapacitySources)-1]
+}
+
+func (c *goQualityCollector) currentLoopCapacitySource() string {
+	for i := len(c.loopCapacitySources) - 1; i >= 0; i-- {
+		if c.loopCapacitySources[i] != "" {
+			return c.loopCapacitySources[i]
+		}
+	}
+	return ""
 }
 
 func (c *goQualityCollector) addFinding(kind, severity string, loc Location, symbol, reason string, metrics map[string]float64) {
@@ -943,6 +1153,239 @@ func hasCallRHS(assign *ast.AssignStmt) bool {
 		}
 	}
 	return false
+}
+
+func appendTarget(assign *ast.AssignStmt) string {
+	if len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+		return ""
+	}
+	lhs, ok := assign.Lhs[0].(*ast.Ident)
+	if !ok || lhs.Name == "_" {
+		return ""
+	}
+	call, ok := assign.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	fun, ok := call.Fun.(*ast.Ident)
+	if !ok || fun.Name != "append" || len(call.Args) == 0 {
+		return ""
+	}
+	arg, ok := call.Args[0].(*ast.Ident)
+	if !ok || arg.Name != lhs.Name {
+		return ""
+	}
+	return lhs.Name
+}
+
+func rangeLoopCapacitySource(stmt *ast.RangeStmt) string {
+	source := capacitySourceName(stmt.X)
+	if source == "" {
+		return ""
+	}
+	return "len(" + source + ")"
+}
+
+func forLoopCapacitySource(stmt *ast.ForStmt) string {
+	if stmt == nil || stmt.Cond == nil {
+		return ""
+	}
+	cond, ok := stmt.Cond.(*ast.BinaryExpr)
+	if !ok || cond.Op != token.LSS && cond.Op != token.LEQ {
+		return ""
+	}
+	index, ok := cond.X.(*ast.Ident)
+	if !ok || index.Name == "_" || !isZeroLoopInit(stmt.Init, index.Name) || !isLoopPostIncrement(stmt.Post, index.Name) {
+		return ""
+	}
+	source := lenCallSourceName(cond.Y)
+	if source == "" {
+		return ""
+	}
+	return "len(" + source + ")"
+}
+
+func isZeroLoopInit(stmt ast.Stmt, index string) bool {
+	assign, ok := stmt.(*ast.AssignStmt)
+	if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+		return false
+	}
+	lhs, ok := assign.Lhs[0].(*ast.Ident)
+	if !ok || lhs.Name != index {
+		return false
+	}
+	lit, ok := assign.Rhs[0].(*ast.BasicLit)
+	return ok && lit.Kind == token.INT && lit.Value == "0"
+}
+
+func isLoopPostIncrement(stmt ast.Stmt, index string) bool {
+	inc, ok := stmt.(*ast.IncDecStmt)
+	if !ok || inc.Tok != token.INC {
+		return false
+	}
+	id, ok := inc.X.(*ast.Ident)
+	return ok && id.Name == index
+}
+
+func lenCallSourceName(expr ast.Expr) string {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return ""
+	}
+	fun, ok := call.Fun.(*ast.Ident)
+	if !ok || fun.Name != "len" {
+		return ""
+	}
+	return capacitySourceName(call.Args[0])
+}
+
+func capacitySourceName(expr ast.Expr) string {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.SelectorExpr:
+		prefix := capacitySourceName(x.X)
+		if prefix == "" {
+			return ""
+		}
+		return prefix + "." + x.Sel.Name
+	default:
+		return ""
+	}
+}
+
+func collectNoCapSliceVars(body *ast.BlockStmt) map[string]bool {
+	noCap := map[string]bool{}
+	capped := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.ValueSpec:
+			for i, name := range x.Names {
+				if name == nil || name.Name == "_" {
+					continue
+				}
+				if len(x.Values) == 0 {
+					if isSliceType(x.Type) {
+						noCap[name.Name] = true
+					}
+					continue
+				}
+				value := x.Values[minInt(i, len(x.Values)-1)]
+				recordSliceCapacityHint(name.Name, value, noCap, capped)
+			}
+		case *ast.AssignStmt:
+			for i, lhs := range x.Lhs {
+				name, ok := lhs.(*ast.Ident)
+				if !ok || name.Name == "_" || i >= len(x.Rhs) {
+					continue
+				}
+				recordSliceCapacityHint(name.Name, x.Rhs[i], noCap, capped)
+			}
+		}
+		return true
+	})
+	for name := range capped {
+		delete(noCap, name)
+	}
+	return noCap
+}
+
+func recordSliceCapacityHint(name string, expr ast.Expr, noCap, capped map[string]bool) {
+	switch {
+	case isCapSliceInit(expr):
+		capped[name] = true
+	case isNoCapSliceInit(expr):
+		if !capped[name] {
+			noCap[name] = true
+		}
+	}
+}
+
+func isNoCapSliceInit(expr ast.Expr) bool {
+	switch x := expr.(type) {
+	case *ast.CompositeLit:
+		return isSliceType(x.Type)
+	case *ast.CallExpr:
+		fun, ok := x.Fun.(*ast.Ident)
+		return ok && fun.Name == "make" && len(x.Args) >= 2 && len(x.Args) < 3 && isSliceType(x.Args[0])
+	default:
+		return false
+	}
+}
+
+func isCapSliceInit(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fun, ok := call.Fun.(*ast.Ident)
+	return ok && fun.Name == "make" && len(call.Args) >= 3 && isSliceType(call.Args[0])
+}
+
+func isSliceType(expr ast.Expr) bool {
+	array, ok := expr.(*ast.ArrayType)
+	return ok && array.Len == nil
+}
+
+func containsStringConcat(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		if binary, ok := n.(*ast.BinaryExpr); ok && binary.Op == token.ADD {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func isStringLiteral(expr ast.Expr) bool {
+	lit, ok := expr.(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING
+}
+
+func structFieldCounts(file *ast.File) map[string]int {
+	out := map[string]int{}
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+			out[ts.Name.Name] = fieldCount(st.Fields)
+		}
+	}
+	return out
+}
+
+func rangeCompositeStructName(expr ast.Expr) string {
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return ""
+	}
+	array, ok := lit.Type.(*ast.ArrayType)
+	if !ok {
+		return ""
+	}
+	switch elt := array.Elt.(type) {
+	case *ast.Ident:
+		return elt.Name
+	case *ast.StarExpr:
+		return ""
+	default:
+		return ""
+	}
 }
 
 func isCommaOKTypeAssertion(file *ast.File, target *ast.TypeAssertExpr) bool {
