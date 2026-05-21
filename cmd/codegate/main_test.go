@@ -33,6 +33,44 @@ func Target() string {
 	}
 }
 
+func TestCodegateAssessGateCommand(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", `package demo
+
+func Target() string {
+	return "ok"
+}
+`)
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "architecture", "--suggestions", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"provider_score_model": "go-architecture-v0"`) || !strings.Contains(got, `"architecture"`) {
+		t.Fatalf("unexpected gated assess output:\n%s", got)
+	}
+}
+
+func TestCodegateAssessRejectsUnknownGate(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", "package demo\n")
+
+	a := &app{out: &bytes.Buffer{}, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "unknown"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected unknown gate to fail")
+	}
+}
+
 func TestCodegateLookupCommand(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")

@@ -151,11 +151,16 @@ func (a *app) lookupCommand() *cobra.Command {
 
 func (a *app) assessCommand() *cobra.Command {
 	var limit int
+	var gates []string
 	cmd := &cobra.Command{
 		Use:   "assess",
 		Short: "Create an agent-readable quality assessment",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			report, err := a.assess(cmd.Context(), limit)
+			parsedGates, err := parseAssessmentGates(gates)
+			if err != nil {
+				return err
+			}
+			report, err := a.assess(cmd.Context(), limit, parsedGates)
 			if err != nil {
 				return err
 			}
@@ -163,6 +168,7 @@ func (a *app) assessCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&limit, "suggestions", 10, "maximum suggestions to include")
+	cmd.Flags().StringSliceVar(&gates, "gate", []string{"all"}, "assessment gate: architecture, maintainability, safety, coverage, or all")
 	return cmd
 }
 
@@ -219,7 +225,7 @@ func (a *app) cycleCommand() *cobra.Command {
 		Short: "Run assess -> suggest -> optionally apply -> validate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			assessment, err := a.assess(ctx, 20)
+			assessment, err := a.assess(ctx, 20, []editor.AssessmentGate{editor.AssessmentGateAll})
 			if err != nil {
 				return err
 			}
@@ -301,12 +307,12 @@ func (a *app) engine(ctx context.Context) (editor.Engine, editor.Scope, error) {
 	return eng, editor.Scope{Language: editor.Go, IncludeTests: a.cfg.includeTests}, nil
 }
 
-func (a *app) assess(ctx context.Context, limit int) (editor.AssessmentReport, error) {
+func (a *app) assess(ctx context.Context, limit int, gates []editor.AssessmentGate) (editor.AssessmentReport, error) {
 	eng, scope, err := a.engine(ctx)
 	if err != nil {
 		return editor.AssessmentReport{}, err
 	}
-	return eng.Assess(ctx, editor.AssessmentOptions{Scope: scope, SuggestionLimit: limit})
+	return eng.Assess(ctx, editor.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates})
 }
 
 func (a *app) print(v interface{}) error {
@@ -316,6 +322,36 @@ func (a *app) print(v interface{}) error {
 	enc := json.NewEncoder(a.out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+func parseAssessmentGates(values []string) ([]editor.AssessmentGate, error) {
+	if len(values) == 0 {
+		return []editor.AssessmentGate{editor.AssessmentGateAll}, nil
+	}
+	seen := map[editor.AssessmentGate]bool{}
+	var out []editor.AssessmentGate
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			gate := editor.AssessmentGate(part)
+			switch gate {
+			case editor.AssessmentGateAll, editor.AssessmentGateArchitecture, editor.AssessmentGateMaintainability, editor.AssessmentGateSafety, editor.AssessmentGateCoverage:
+				if !seen[gate] {
+					seen[gate] = true
+					out = append(out, gate)
+				}
+			default:
+				return nil, fmt.Errorf("unsupported assessment gate %q", part)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []editor.AssessmentGate{editor.AssessmentGateAll}, nil
+	}
+	return out, nil
 }
 
 type dirSource struct {

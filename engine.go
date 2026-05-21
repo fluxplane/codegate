@@ -194,81 +194,22 @@ func (e *engine) Assess(ctx context.Context, opts AssessmentOptions) (Assessment
 	if scope.Language == "" {
 		scope.Language = Go
 	}
-	packages, err := e.editor.Packages(ctx, scope)
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	includeTests := scope.IncludeTests
-	symbols, err := e.editor.FindSymbols(ctx, SymbolSelector{Language: scope.Language, IncludeTests: &includeTests})
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	imports, err := e.editor.Imports(ctx, scope)
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	metrics, err := e.editor.Metrics(ctx, scope)
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	validation, err := e.editor.Validate(ctx, ValidationOptions{
-		Scope: scope,
-		Kinds: []ValidationKind{ValidationParse, ValidationTypecheck},
-	})
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	proposals, err := e.editor.SuggestRefactorings(ctx, WithSuggestScope(scope))
-	if err != nil {
-		return AssessmentReport{}, err
-	}
-	executable := 0
-	for _, proposal := range proposals {
-		if HasOperations(proposal) {
-			executable++
+	opts.Scope = scope
+	var reports []AssessmentReport
+	snapshot := e.editor.snapshot(nil)
+	for _, backend := range e.editor.selectedBackends(scope) {
+		provider, ok := backend.(AssessmentProvider)
+		if !ok {
+			reports = append(reports, unsupportedAssessmentReport(backend.Spec(), scope))
+			continue
 		}
+		report, err := provider.Assess(ctx, snapshot, scope, opts)
+		if err != nil {
+			return AssessmentReport{}, err
+		}
+		reports = append(reports, report)
 	}
-	top := topAssessmentUnits(metrics.Units, optionLimit(opts.TopUnitLimit, 8))
-	pressure := 0.0
-	if len(top) > 0 {
-		pressure = top[0].PressureScore
-	}
-	diagnostics := append([]Diagnostic(nil), packages.Diagnostics...)
-	diagnostics = append(diagnostics, metrics.Diagnostics...)
-	diagnostics = append(diagnostics, validation.Diagnostics...)
-	return AssessmentReport{
-		Root:     e.root,
-		Language: string(scope.Language),
-		Summary: AssessmentSummary{
-			Packages:        len(packages.Packages),
-			Symbols:         len(symbols),
-			Imports:         len(imports),
-			Suggestions:     len(proposals),
-			ExecutableFixes: executable,
-			Diagnostics:     len(diagnostics),
-			Score:           coarseAssessmentScore(validation.Passed, len(proposals), pressure),
-		},
-		Scores: ScoreSet{
-			Overall:         coarseAssessmentScore(validation.Passed, len(proposals), pressure),
-			Maintainability: coarseAssessmentScore(true, len(proposals), pressure),
-			Coverage:        100,
-			Pressure:        pressure,
-		},
-		Validation: ValidationSummary{
-			Passed:         validation.Passed,
-			ResolutionMode: validation.ResolutionMode,
-			Diagnostics:    len(validation.Diagnostics),
-			Files:          len(validation.AffectedPaths),
-			Complete:       validation.Complete,
-		},
-		TopUnits:    top,
-		Suggestions: summarizeAssessmentSuggestions(proposals, opts.SuggestionLimit),
-		Diagnostics: diagnostics,
-		Metrics: map[string]interface{}{
-			"score_model": "skeleton",
-			"note":        "assessment scoring is public and will be expanded with architecture gates next",
-		},
-	}, nil
+	return e.aggregateAssessmentReports(scope, reports), nil
 }
 
 func (e *engine) Suggest(ctx context.Context, opts SuggestOptions) ([]Proposal, error) {
@@ -337,66 +278,151 @@ func lookupConfidence(symbols int) Confidence {
 	}
 }
 
-func topAssessmentUnits(units []UnitMetrics, limit int) []UnitMetrics {
-	units = append([]UnitMetrics(nil), units...)
-	sort.Slice(units, func(i, j int) bool {
-		if units[i].PressureScore == units[j].PressureScore {
-			return units[i].UnitID < units[j].UnitID
-		}
-		return units[i].PressureScore > units[j].PressureScore
-	})
-	if limit > 0 && len(units) > limit {
-		return units[:limit]
+func (e *engine) aggregateAssessmentReports(scope Scope, reports []AssessmentReport) AssessmentReport {
+	out := AssessmentReport{
+		Root:     e.root,
+		Language: string(scope.Language),
+		Validation: ValidationSummary{
+			Passed:   true,
+			Complete: true,
+		},
+		Scores: ScoreSet{
+			Overall:         100,
+			Boundary:        100,
+			TestBoundary:    100,
+			Coupling:        100,
+			SideEffect:      100,
+			Coverage:        100,
+			Maintainability: 100,
+		},
+		Metrics: map[string]interface{}{
+			"score_model": "aggregate-v0",
+		},
 	}
-	return units
-}
-
-func summarizeAssessmentSuggestions(proposals []Proposal, limit int) []AssessmentSuggestion {
-	out := make([]AssessmentSuggestion, 0, len(proposals))
-	for _, proposal := range proposals {
-		out = append(out, AssessmentSuggestion{
-			ID:         proposal.ID,
-			Kind:       proposal.Kind,
-			Title:      proposal.Title,
-			Summary:    proposal.Summary,
-			Confidence: proposal.Confidence,
-			Risk:       proposal.Risk,
-			Operations: len(proposal.Operations),
-			Metrics:    proposal.Metrics,
-			Evidence:   proposal.Evidence,
-		})
-		if limit > 0 && len(out) >= limit {
-			break
+	if len(reports) == 0 {
+		out.Validation.Passed = false
+		out.Validation.Complete = false
+		out.Scores.Overall = 0
+		out.Scores.Coverage = 0
+		out.Findings = append(out.Findings, Finding{Kind: "coverage_no_backend", Severity: "error", Reason: "No backend was selected for assessment."})
+		finalizeAssessmentSummary(&out)
+		return out
+	}
+	for _, report := range reports {
+		if out.Language == "" {
+			out.Language = report.Language
+		}
+		out.Summary.Packages += report.Summary.Packages
+		out.Summary.Symbols += report.Summary.Symbols
+		out.Summary.Imports += report.Summary.Imports
+		out.Summary.Suggestions += report.Summary.Suggestions
+		out.Summary.ExecutableFixes += report.Summary.ExecutableFixes
+		out.Findings = append(out.Findings, report.Findings...)
+		out.Violations = append(out.Violations, report.Violations...)
+		out.TopUnits = append(out.TopUnits, report.TopUnits...)
+		out.Suggestions = append(out.Suggestions, report.Suggestions...)
+		out.Diagnostics = append(out.Diagnostics, report.Diagnostics...)
+		out.Validation.Diagnostics += report.Validation.Diagnostics
+		out.Validation.Files += report.Validation.Files
+		if report.Validation.ResolutionMode != "" {
+			out.Validation.ResolutionMode = report.Validation.ResolutionMode
+		}
+		if !report.Validation.Passed {
+			out.Validation.Passed = false
+		}
+		if !report.Validation.Complete {
+			out.Validation.Complete = false
+		}
+		out.Scores = minScoreSet(out.Scores, report.Scores)
+		if report.Scores.Pressure > out.Scores.Pressure {
+			out.Scores.Pressure = report.Scores.Pressure
+		}
+		if model, ok := report.Metrics["score_model"]; ok {
+			out.Metrics["provider_score_model"] = model
+		}
+		if gates, ok := report.Metrics["gates"]; ok {
+			out.Metrics["gates"] = gates
 		}
 	}
+	sortAssessmentOutput(&out)
+	finalizeAssessmentSummary(&out)
 	return out
 }
 
-func coarseAssessmentScore(validationPassed bool, suggestions int, pressure float64) int {
-	if !validationPassed {
-		return 40
+func unsupportedAssessmentReport(spec BackendSpec, scope Scope) AssessmentReport {
+	return AssessmentReport{
+		Language: string(spec.Language),
+		Summary:  AssessmentSummary{Score: 50},
+		Scores: ScoreSet{
+			Overall:         50,
+			Coverage:        50,
+			Maintainability: 50,
+		},
+		Validation: ValidationSummary{Passed: true, Complete: false},
+		Findings: []Finding{{
+			Kind:     "coverage_assessment_unsupported",
+			Severity: "warning",
+			Reason:   "Backend does not implement assessment reporting.",
+		}},
+		Metrics: map[string]interface{}{
+			"score_model": "unsupported",
+			"language":    string(scope.Language),
+		},
 	}
-	score := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100))
-	return maxAssessmentInt(50, score)
 }
 
-func optionLimit(value, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
+func finalizeAssessmentSummary(r *AssessmentReport) {
+	r.Summary.Findings = len(r.Findings)
+	r.Summary.Violations = len(r.Violations)
+	r.Summary.Diagnostics = len(r.Diagnostics)
+	r.Summary.Score = r.Scores.Overall
 }
 
-func minAssessmentInt(a, b int) int {
-	if a < b {
-		return a
+func minScoreSet(a, b ScoreSet) ScoreSet {
+	if b.Overall != 0 && b.Overall < a.Overall {
+		a.Overall = b.Overall
 	}
-	return b
+	if b.Boundary != 0 && b.Boundary < a.Boundary {
+		a.Boundary = b.Boundary
+	}
+	if b.TestBoundary != 0 && b.TestBoundary < a.TestBoundary {
+		a.TestBoundary = b.TestBoundary
+	}
+	if b.Coupling != 0 && b.Coupling < a.Coupling {
+		a.Coupling = b.Coupling
+	}
+	if b.SideEffect != 0 && b.SideEffect < a.SideEffect {
+		a.SideEffect = b.SideEffect
+	}
+	if b.Coverage != 0 && b.Coverage < a.Coverage {
+		a.Coverage = b.Coverage
+	}
+	if b.Maintainability != 0 && b.Maintainability < a.Maintainability {
+		a.Maintainability = b.Maintainability
+	}
+	return a
 }
 
-func maxAssessmentInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+func sortAssessmentOutput(report *AssessmentReport) {
+	sort.Slice(report.TopUnits, func(i, j int) bool {
+		if report.TopUnits[i].PressureScore == report.TopUnits[j].PressureScore {
+			return report.TopUnits[i].UnitID < report.TopUnits[j].UnitID
+		}
+		return report.TopUnits[i].PressureScore > report.TopUnits[j].PressureScore
+	})
+	sort.Slice(report.Findings, func(i, j int) bool {
+		if report.Findings[i].Severity != report.Findings[j].Severity {
+			return report.Findings[i].Severity > report.Findings[j].Severity
+		}
+		if report.Findings[i].Kind != report.Findings[j].Kind {
+			return report.Findings[i].Kind < report.Findings[j].Kind
+		}
+		return report.Findings[i].Package < report.Findings[j].Package
+	})
+	sort.Slice(report.Violations, func(i, j int) bool {
+		if report.Violations[i].Severity != report.Violations[j].Severity {
+			return report.Violations[i].Severity > report.Violations[j].Severity
+		}
+		return report.Violations[i].Kind < report.Violations[j].Kind
+	})
 }

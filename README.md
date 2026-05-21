@@ -16,6 +16,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 - Direct source/workspace integration via `editor.WithSource`.
 - Public engine facade via `editor.NewEngine()` for agent loops.
 - Agent-readable `Lookup`, `Assess`, `Suggest`, `Validate`, and capability reporting APIs.
+- Language-neutral assessment provider contract with architecture, maintainability, safety, and coverage gates.
 - Cobra CLI skeleton in `cmd/codegate` for JSON-first agent/LLM skill usage.
 - Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
@@ -141,6 +142,12 @@ _ = report.Summary.Score
 
 The lower-level `editor.New` API remains available for direct source editing. The engine facade is the preferred public shape for agent workflows.
 
+The CLI exposes the same assessment gates for agent skills:
+
+```sh
+go run ./cmd/codegate --root . assess --gate architecture --suggestions 3
+```
+
 ## Agentruntime Integration
 
 Use `adapter/agentruntime` to bridge an agentruntime workspace without adding an agentruntime dependency to core:
@@ -225,7 +232,7 @@ These limitations are intentional in core. Toolchain execution and disk persiste
 Upcoming work:
 
 1. Replace the existing agentruntime Go language plugin internals with calls into the engine facade.
-2. Expand assessment scoring with architecture gates, boundary findings, and violation reports.
+2. Deepen Go architecture rules with explicit boundary configuration and stronger violation classification.
 3. Add a Markdown backend proof, likely goldmark-backed, for structural quality checks outside code.
 4. Add a tree-sitter-backed backend proof for another code language.
 5. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.

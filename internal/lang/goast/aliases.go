@@ -24,6 +24,15 @@ type (
 	ValidationKind          = core.ValidationKind
 	ValidationOptions       = core.ValidationOptions
 	ValidationResult        = core.ValidationResult
+	AssessmentGate          = core.AssessmentGate
+	AssessmentOptions       = core.AssessmentOptions
+	AssessmentReport        = core.AssessmentReport
+	AssessmentSummary       = core.AssessmentSummary
+	ScoreSet                = core.ScoreSet
+	ValidationSummary       = core.ValidationSummary
+	Finding                 = core.Finding
+	Violation               = core.Violation
+	AssessmentSuggestion    = core.AssessmentSuggestion
 	Evidence                = core.Evidence
 	Scope                   = core.Scope
 	SymbolSelector          = core.SymbolSelector
@@ -93,6 +102,14 @@ const (
 const (
 	ValidationParse     = core.ValidationParse
 	ValidationTypecheck = core.ValidationTypecheck
+)
+
+const (
+	AssessmentGateAll             = core.AssessmentGateAll
+	AssessmentGateArchitecture    = core.AssessmentGateArchitecture
+	AssessmentGateMaintainability = core.AssessmentGateMaintainability
+	AssessmentGateSafety          = core.AssessmentGateSafety
+	AssessmentGateCoverage        = core.AssessmentGateCoverage
 )
 
 const (

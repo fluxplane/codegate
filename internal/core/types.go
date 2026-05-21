@@ -240,6 +240,105 @@ type Validator interface {
 	Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error)
 }
 
+type AssessmentGate string
+
+const (
+	AssessmentGateAll             AssessmentGate = "all"
+	AssessmentGateArchitecture    AssessmentGate = "architecture"
+	AssessmentGateMaintainability AssessmentGate = "maintainability"
+	AssessmentGateSafety          AssessmentGate = "safety"
+	AssessmentGateCoverage        AssessmentGate = "coverage"
+)
+
+type AssessmentOptions struct {
+	Scope           Scope            `json:"scope,omitempty"`
+	SuggestionLimit int              `json:"suggestion_limit,omitempty"`
+	TopUnitLimit    int              `json:"top_unit_limit,omitempty"`
+	Gates           []AssessmentGate `json:"gates,omitempty"`
+}
+
+type AssessmentReport struct {
+	Root        string                 `json:"root"`
+	Language    string                 `json:"language"`
+	Summary     AssessmentSummary      `json:"summary"`
+	Scores      ScoreSet               `json:"scores"`
+	Validation  ValidationSummary      `json:"validation"`
+	Findings    []Finding              `json:"findings,omitempty"`
+	Violations  []Violation            `json:"violations,omitempty"`
+	TopUnits    []UnitMetrics          `json:"top_units,omitempty"`
+	Suggestions []AssessmentSuggestion `json:"suggestions,omitempty"`
+	Diagnostics []Diagnostic           `json:"diagnostics,omitempty"`
+	Metrics     map[string]interface{} `json:"metrics,omitempty"`
+}
+
+type AssessmentSummary struct {
+	Score           int `json:"score"`
+	Packages        int `json:"packages"`
+	Symbols         int `json:"symbols"`
+	Imports         int `json:"imports"`
+	Suggestions     int `json:"suggestions"`
+	ExecutableFixes int `json:"executable_fixes"`
+	Findings        int `json:"findings"`
+	Violations      int `json:"violations"`
+	Diagnostics     int `json:"diagnostics"`
+}
+
+type ScoreSet struct {
+	Overall         int     `json:"overall"`
+	Boundary        int     `json:"boundary,omitempty"`
+	TestBoundary    int     `json:"test_boundary,omitempty"`
+	Coupling        int     `json:"coupling,omitempty"`
+	SideEffect      int     `json:"side_effect,omitempty"`
+	Coverage        int     `json:"coverage,omitempty"`
+	Maintainability int     `json:"maintainability"`
+	Pressure        float64 `json:"pressure"`
+}
+
+type ValidationSummary struct {
+	Passed         bool   `json:"passed"`
+	ResolutionMode string `json:"resolution_mode"`
+	Diagnostics    int    `json:"diagnostics"`
+	Files          int    `json:"files"`
+	Complete       bool   `json:"complete"`
+}
+
+type Finding struct {
+	Kind     string     `json:"kind"`
+	Severity string     `json:"severity"`
+	Location Location   `json:"location,omitempty"`
+	Package  string     `json:"package,omitempty"`
+	Symbol   string     `json:"symbol,omitempty"`
+	Evidence []Evidence `json:"evidence,omitempty"`
+	Allowed  bool       `json:"allowed,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
+}
+
+type Violation struct {
+	Kind     string     `json:"kind"`
+	Severity string     `json:"severity"`
+	Location Location   `json:"location,omitempty"`
+	Package  string     `json:"package,omitempty"`
+	Symbol   string     `json:"symbol,omitempty"`
+	Evidence []Evidence `json:"evidence,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
+}
+
+type AssessmentSuggestion struct {
+	ID         string             `json:"id"`
+	Kind       RefactorKind       `json:"kind"`
+	Title      string             `json:"title"`
+	Summary    string             `json:"summary,omitempty"`
+	Confidence Confidence         `json:"confidence"`
+	Risk       RiskLevel          `json:"risk"`
+	Operations int                `json:"operations"`
+	Metrics    map[string]float64 `json:"metrics,omitempty"`
+	Evidence   []Evidence         `json:"evidence,omitempty"`
+}
+
+type AssessmentProvider interface {
+	Assess(ctx context.Context, snapshot Snapshot, scope Scope, opts AssessmentOptions) (AssessmentReport, error)
+}
+
 type Evidence struct {
 	Kind     string
 	Message  string
