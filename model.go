@@ -63,7 +63,10 @@ const (
 	ImportDirectionBoth    = core.ImportDirectionBoth
 )
 
-const Go = core.Go
+const (
+	Go       = core.Go
+	Markdown = core.Markdown
+)
 
 const (
 	CapabilityLookup         = core.CapabilityLookup

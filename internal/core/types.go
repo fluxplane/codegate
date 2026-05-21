@@ -4,7 +4,10 @@ import "context"
 
 type LanguageID string
 
-const Go LanguageID = "go"
+const (
+	Go       LanguageID = "go"
+	Markdown LanguageID = "markdown"
+)
 
 type BackendInfo struct {
 	Language       LanguageID

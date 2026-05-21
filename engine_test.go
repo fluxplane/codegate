@@ -59,11 +59,75 @@ func TestEngineCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	specs := eng.Capabilities()
-	if len(specs) != 1 || specs[0].Language != Go {
+	if len(specs) != 2 || specs[0].Language != Go || specs[1].Language != Markdown {
 		t.Fatalf("unexpected capabilities: %#v", specs)
 	}
 	if !hasCapability(specs[0], CapabilityLookup, CapabilityAdvanced) {
 		t.Fatalf("go backend did not declare advanced lookup: %#v", specs[0].Capabilities)
+	}
+	if !hasCapability(specs[1], CapabilityLookup, CapabilityBasic) {
+		t.Fatalf("markdown backend did not declare basic lookup: %#v", specs[1].Capabilities)
+	}
+}
+
+func TestEngineMarkdownLookupAssessValidate(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "README.md", `# Demo
+
+See [Missing](#missing).
+
+### Jumped
+
+`)
+
+	ctx := context.Background()
+	eng, err := NewEngine().Roots(".").WithFS(os.DirFS(root)).Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lookup, err := eng.Lookup(ctx, LookupQuery{
+		Language: Markdown,
+		Name:     "Jumped",
+		Kind:     SymbolNamespace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lookup.Symbols) != 1 || lookup.Symbols[0].Language != Markdown || lookup.Symbols[0].QualifiedName != "README.md#jumped" {
+		t.Fatalf("unexpected markdown lookup result: %#v", lookup)
+	}
+
+	positionLookup, err := eng.Lookup(ctx, LookupQuery{
+		Language: Markdown,
+		Path:     "README.md",
+		Line:     3,
+		Column:   5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positionLookup.Symbols) != 1 || positionLookup.Symbols[0].Name != "Demo" || positionLookup.Target.NodeKind != "enclosing_symbol" {
+		t.Fatalf("unexpected markdown position lookup result: %#v", positionLookup)
+	}
+
+	report, err := eng.Assess(ctx, AssessmentOptions{
+		Scope: Scope{Language: Markdown},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["provider_score_model"] != "markdown-structure-v0" || !hasFinding(report, "markdown_heading_level_jump") || !hasFinding(report, "markdown_broken_local_heading_link") {
+		t.Fatalf("unexpected markdown assessment: %#v", report)
+	}
+
+	validation, err := eng.Validate(ctx, ValidationOptions{Scope: Scope{Language: Markdown}, Kinds: []ValidationKind{ValidationParse}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Passed || validation.ResolutionMode != "structural" || len(validation.AffectedPaths) != 1 {
+		t.Fatalf("unexpected markdown validation: %#v", validation)
 	}
 }
 

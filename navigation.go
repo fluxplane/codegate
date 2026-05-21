@@ -99,7 +99,7 @@ func enclosingSymbol(symbols []Symbol, filePath string, offset int, exclude Symb
 		if sym.ID == exclude || core.CleanPath(sym.Location.URI) != filePath {
 			continue
 		}
-		if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod && sym.Kind != SymbolStruct && sym.Kind != SymbolInterface && sym.Kind != SymbolType {
+		if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod && sym.Kind != SymbolStruct && sym.Kind != SymbolInterface && sym.Kind != SymbolType && sym.Kind != SymbolNamespace && sym.Kind != SymbolFile {
 			continue
 		}
 		if core.ContainsOffset(sym.Location.Range, offset) {

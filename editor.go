@@ -14,6 +14,7 @@ import (
 
 	"github.com/codewandler/editor/internal/core"
 	"github.com/codewandler/editor/internal/lang/goast"
+	"github.com/codewandler/editor/internal/lang/markdown"
 )
 
 type Option func(*Editor) error
@@ -46,6 +47,9 @@ func New(root string, opts ...Option) (*Editor, error) {
 	}
 	if _, ok := ed.backends[Go]; !ok {
 		ed.backends[Go] = goast.New()
+	}
+	if _, ok := ed.backends[Markdown]; !ok {
+		ed.backends[Markdown] = markdown.New()
 	}
 	for _, lang := range ed.languages {
 		if _, ok := ed.backends[lang]; !ok {

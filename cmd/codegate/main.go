@@ -207,7 +207,7 @@ func (a *app) validateCommand() *cobra.Command {
 			}
 			result, err := eng.Validate(cmd.Context(), editor.ValidationOptions{
 				Scope: scope,
-				Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck},
+				Kinds: validationKinds(scope.Language),
 			})
 			if err != nil {
 				return err
@@ -271,7 +271,7 @@ func (a *app) cycleCommand() *cobra.Command {
 			}
 			validation, err := changes.Validate(ctx, editor.ValidationOptions{
 				Scope: scope,
-				Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck},
+				Kinds: validationKinds(scope.Language),
 			})
 			if err != nil {
 				return err
@@ -297,14 +297,17 @@ func (a *app) cycleCommand() *cobra.Command {
 }
 
 func (a *app) engine(ctx context.Context) (editor.Engine, editor.Scope, error) {
-	if a.cfg.language != string(editor.Go) {
-		return nil, editor.Scope{}, fmt.Errorf("language %q is not wired yet; current skeleton supports go", a.cfg.language)
+	lang := editor.LanguageID(a.cfg.language)
+	switch lang {
+	case editor.Go, editor.Markdown:
+	default:
+		return nil, editor.Scope{}, fmt.Errorf("language %q is not wired; supported languages: go, markdown", a.cfg.language)
 	}
 	eng, err := editor.NewEngine().Roots(a.cfg.root).WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).Build(ctx)
 	if err != nil {
 		return nil, editor.Scope{}, err
 	}
-	return eng, editor.Scope{Language: editor.Go, IncludeTests: a.cfg.includeTests}, nil
+	return eng, editor.Scope{Language: lang, IncludeTests: a.cfg.includeTests}, nil
 }
 
 func (a *app) assess(ctx context.Context, limit int, gates []editor.AssessmentGate) (editor.AssessmentReport, error) {
@@ -313,6 +316,13 @@ func (a *app) assess(ctx context.Context, limit int, gates []editor.AssessmentGa
 		return editor.AssessmentReport{}, err
 	}
 	return eng.Assess(ctx, editor.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates})
+}
+
+func validationKinds(lang editor.LanguageID) []editor.ValidationKind {
+	if lang == editor.Go {
+		return []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck}
+	}
+	return []editor.ValidationKind{editor.ValidationParse}
 }
 
 func (a *app) print(v interface{}) error {

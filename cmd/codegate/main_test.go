@@ -109,8 +109,44 @@ func TestCodegateCapabilitiesCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"capability": "lookup"`) {
+	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"language": "markdown"`) || !strings.Contains(got, `"capability": "lookup"`) {
 		t.Fatalf("unexpected capabilities output:\n%s", got)
+	}
+}
+
+func TestCodegateMarkdownCommands(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "README.md", `# Demo
+
+See [Missing](#missing).
+
+### Jumped
+`)
+
+	var assessOut bytes.Buffer
+	a := &app{out: &assessOut, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "markdown", "assess", "--gate", "maintainability"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := assessOut.String()
+	if !strings.Contains(got, `"provider_score_model": "markdown-structure-v0"`) || !strings.Contains(got, `"markdown_heading_level_jump"`) {
+		t.Fatalf("unexpected markdown assess output:\n%s", got)
+	}
+
+	var lookupOut bytes.Buffer
+	a = &app{out: &lookupOut, err: &bytes.Buffer{}}
+	cmd = a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "markdown", "lookup", "--name", "Jumped", "--kind", "namespace"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got = lookupOut.String()
+	if !strings.Contains(got, `"Name": "Jumped"`) || !strings.Contains(got, `"Language": "markdown"`) {
+		t.Fatalf("unexpected markdown lookup output:\n%s", got)
 	}
 }
 

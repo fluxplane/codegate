@@ -21,6 +21,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 - Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
 - Pluggable language backend contract via `editor.Backend`.
+- Built-in language backends for Go and Markdown.
 - Optional validation through parse/typecheck-capable backends.
 - Go AST backend for:
   - package discovery
@@ -56,6 +57,12 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - boolean flag parameters
   - high fan-in packages
   - executable operation payloads for safe suggestions; advisory evidence for suggestions that need user intent
+- Goldmark-backed Markdown structure support for:
+  - document and heading lookup
+  - stable generated anchors
+  - enclosing section navigation
+  - parse/structure validation
+  - quality findings for missing or repeated H1s, heading-level jumps, duplicate anchors, oversized or empty sections, and broken local heading links
 
 ## Position coordinates
 
@@ -146,6 +153,8 @@ The CLI exposes the same assessment gates for agent skills:
 
 ```sh
 go run ./cmd/codegate --root . assess --gate architecture --suggestions 3
+go run ./cmd/codegate --root . --language markdown assess --gate maintainability
+go run ./cmd/codegate --root . --language markdown lookup --name "Architecture" --kind namespace
 ```
 
 ## Agentruntime Integration
@@ -178,7 +187,7 @@ ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor
 
 ## Architecture
 
-The root package exposes the public facade and language-neutral model. The shared internal model and backend contract live in `internal/core`; the Go implementation lives in `internal/lang/goast`.
+The root package exposes the public facade and language-neutral model. The shared internal model and backend contract live in `internal/core`; language implementations live under `internal/lang/*`.
 
 Core responsibilities:
 
@@ -198,6 +207,8 @@ Backend responsibilities:
 - compile supported semantic operations into text edits
 - format changed files when supported
 - report diagnostics, limitations, and resolution mode
+
+The current backend split is deliberate: Go-specific AST and type packages stay under `internal/lang/goast`, while Markdown uses goldmark under `internal/lang/markdown`. A future Java, Groovy, or tree-sitter backend should only need to implement the same backend/provider interfaces and emit the shared model.
 
 ## Go Support Status
 
@@ -227,17 +238,37 @@ Current limitations:
 
 These limitations are intentional in core. Toolchain execution and disk persistence should be explicit adapters.
 
+## Markdown Support Status
+
+The Markdown backend is a proof that non-Go languages and non-code documents can use the same engine surface. It is goldmark-backed and structural rather than semantic.
+
+Supported today:
+
+- `.md` and `.markdown` discovery
+- document and heading symbols
+- anchor lookup by name, qualified name, or generated anchor
+- position lookup with enclosing heading fallback
+- structural validation
+- assessment reports for document quality and agent-readable navigation risks
+
+Current limitations:
+
+- no executable Markdown edit or refactor operations yet
+- no cross-file link graph
+- no frontmatter or custom extension model yet
+- no tree-sitter-style code block analysis
+
 ## Roadmap
 
 Upcoming work:
 
 1. Replace the existing agentruntime Go language plugin internals with calls into the engine facade.
 2. Deepen Go architecture rules with explicit boundary configuration and stronger violation classification.
-3. Add a Markdown backend proof, likely goldmark-backed, for structural quality checks outside code.
-4. Add a tree-sitter-backed backend proof for another code language.
-5. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
-6. Add validation adapters for explicit build/test workflows.
-7. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
+3. Add a tree-sitter-backed backend proof for another code language such as Java or Groovy.
+4. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
+5. Add validation adapters for explicit build/test workflows.
+6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
+7. Add Markdown edit/refactor operations for deterministic documentation fixes.
 
 ## Non-goals
 
