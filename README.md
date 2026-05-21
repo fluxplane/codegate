@@ -87,6 +87,48 @@ fmt.Println(report.Summary.Score)
 
 Reports include scores, findings, violations, diagnostics, top units, and suggestions. They are designed to be consumed by LLMs, CI bots, and review automation.
 
+## Architecture Rules
+
+Go assessment can take explicit import-boundary rules. Rules are prefix matched against the importing unit, package directory, or source path and the imported path. More specific rules win, so a narrow `allow` can override a broader `deny`.
+
+```go
+report, err := engine.Assess(ctx, codegate.AssessmentOptions{
+	Scope: codegate.Scope{Language: codegate.Go},
+	Gates: []codegate.AssessmentGate{codegate.AssessmentGateArchitecture},
+	Architecture: &codegate.ArchitectureRules{
+		Imports: []codegate.ArchitectureImportRule{{
+			From:   "domain",
+			To:     "example.com/project/infra",
+			Action: codegate.ArchitectureRuleDeny,
+			Reason: "domain should not depend on infra",
+		}},
+	},
+})
+```
+
+The same policy can be passed to the CLI as JSON:
+
+```json
+{
+  "imports": [
+    {
+      "from": "domain",
+      "to": "example.com/project/infra",
+      "action": "deny",
+      "reason": "domain should not depend on infra"
+    }
+  ],
+  "test_imports": [
+    {
+      "from": "app",
+      "to": "example.com/project/testutil",
+      "action": "deny",
+      "reason": "production code should not import test helpers"
+    }
+  ]
+}
+```
+
 ## Markdown Support
 
 Markdown is supported through a structural backend:
@@ -108,6 +150,7 @@ The `cmd/codegate` CLI exposes the same engine loop as JSON-first commands:
 go run ./cmd/codegate --root . --language go capabilities
 go run ./cmd/codegate --root . --language go lookup --name Target --kind function
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
+go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
 go run ./cmd/codegate --root . --language go suggest --executable
 go run ./cmd/codegate --root . --language go cycle
 go run ./cmd/codegate --root . --language markdown assess --gate maintainability
@@ -190,6 +233,7 @@ Built-in backends:
 - Markdown support is structural and read-only.
 - CLI output is JSON-only.
 - External validation adapters for build/test workflows are not implemented yet.
+- Architecture rules are import-boundary focused; richer layer models and package roles are still upcoming.
 
 ## Release Readiness
 
@@ -198,7 +242,7 @@ Before tagging, run the checklist in [`RELEASE.md`](RELEASE.md). The normal test
 ## Roadmap
 
 1. Replace the existing agentruntime Go language plugin internals with calls into the engine facade.
-2. Deepen Go architecture rules with explicit boundary configuration and stronger violation classification.
+2. Deepen Go architecture rules with package roles, layer models, and stronger violation classification.
 3. Add a tree-sitter-backed backend proof for another code language such as Java or Groovy.
 4. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 5. Add validation adapters for explicit build/test workflows.

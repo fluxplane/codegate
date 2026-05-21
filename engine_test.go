@@ -198,6 +198,136 @@ func TestEngineAssessReportsValidationViolations(t *testing.T) {
 	}
 }
 
+func TestEngineAssessAppliesArchitectureImportRules(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "domain/domain.go", `package domain
+
+import "example.com/demo/infra"
+
+func UseInfra() string {
+	return infra.Name
+}
+`)
+	writeEngineFile(t, root, "infra/infra.go", `package infra
+
+const Name = "infra"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			Imports: []ArchitectureImportRule{{
+				From:   "domain",
+				To:     "example.com/demo/infra",
+				Action: ArchitectureRuleDeny,
+				Reason: "domain must not depend on infra",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasViolation(report, "architecture_denied_import") || report.Scores.Boundary >= 100 {
+		t.Fatalf("expected denied import violation and boundary score impact, got %#v", report)
+	}
+}
+
+func TestEngineAssessArchitectureAllowOverridesBroaderDeny(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "domain/domain.go", `package domain
+
+import "example.com/demo/infra/safe"
+
+func UseSafeInfra() string {
+	return safe.Name
+}
+`)
+	writeEngineFile(t, root, "infra/safe/safe.go", `package safe
+
+const Name = "safe"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			Imports: []ArchitectureImportRule{
+				{From: "domain", To: "example.com/demo/infra", Action: ArchitectureRuleDeny},
+				{From: "domain", To: "example.com/demo/infra/safe", Action: ArchitectureRuleAllow},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasViolation(report, "architecture_denied_import") {
+		t.Fatalf("expected allow override to suppress broader deny, got %#v", report.Violations)
+	}
+}
+
+func TestEngineAssessAppliesArchitectureTestImportRules(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "app/app.go", `package app
+
+import "example.com/demo/testutil"
+
+func Fixture() string {
+	return testutil.Name
+}
+`)
+	writeEngineFile(t, root, "testutil/testutil.go", `package testutil
+
+const Name = "fixture"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: &ArchitectureRules{
+			TestImports: []ArchitectureImportRule{{
+				From:   "app",
+				To:     "example.com/demo/testutil",
+				Action: ArchitectureRuleDeny,
+				Reason: "production code should not import test helpers",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasViolation(report, "architecture_test_boundary_import") || report.Scores.TestBoundary >= 100 {
+		t.Fatalf("expected test-boundary violation and score impact, got %#v", report)
+	}
+}
+
 func TestEngineRejectsMultipleRootsForNow(t *testing.T) {
 	_, err := New().Roots("one", "two").WithLanguage(goast.New()).Build(context.Background())
 	if err == nil {

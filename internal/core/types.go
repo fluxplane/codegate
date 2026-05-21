@@ -254,10 +254,30 @@ const (
 )
 
 type AssessmentOptions struct {
-	Scope           Scope            `json:"scope,omitempty"`
-	SuggestionLimit int              `json:"suggestion_limit,omitempty"`
-	TopUnitLimit    int              `json:"top_unit_limit,omitempty"`
-	Gates           []AssessmentGate `json:"gates,omitempty"`
+	Scope           Scope              `json:"scope,omitempty"`
+	SuggestionLimit int                `json:"suggestion_limit,omitempty"`
+	TopUnitLimit    int                `json:"top_unit_limit,omitempty"`
+	Gates           []AssessmentGate   `json:"gates,omitempty"`
+	Architecture    *ArchitectureRules `json:"architecture,omitempty"`
+}
+
+type ArchitectureRuleAction string
+
+const (
+	ArchitectureRuleAllow ArchitectureRuleAction = "allow"
+	ArchitectureRuleDeny  ArchitectureRuleAction = "deny"
+)
+
+type ArchitectureRules struct {
+	Imports     []ArchitectureImportRule `json:"imports,omitempty"`
+	TestImports []ArchitectureImportRule `json:"test_imports,omitempty"`
+}
+
+type ArchitectureImportRule struct {
+	From   string                 `json:"from,omitempty"`
+	To     string                 `json:"to,omitempty"`
+	Action ArchitectureRuleAction `json:"action,omitempty"`
+	Reason string                 `json:"reason,omitempty"`
 }
 
 type AssessmentReport struct {

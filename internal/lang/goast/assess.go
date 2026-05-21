@@ -35,13 +35,15 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 	diagnostics = append(diagnostics, validation.Diagnostics...)
 	findings := goAssessmentFindings(idx, units, validation, opts)
 	violations := goAssessmentViolations(validation, opts)
+	violations = append(violations, goArchitectureViolations(idx, opts)...)
+	sortViolations(violations)
 	executable := 0
 	for _, proposal := range proposals {
 		if len(proposal.Operations) > 0 {
 			executable++
 		}
 	}
-	scores := goAssessmentScores(validation.Passed, findings, violations, len(proposals), pressure)
+	scores := goAssessmentScores(validation.Passed, findings, violations, len(proposals), pressure, opts.Architecture != nil)
 	return AssessmentReport{
 		Language: string(Go),
 		Summary: AssessmentSummary{
@@ -137,25 +139,108 @@ func goAssessmentFindings(idx *index, units []UnitMetrics, validation Validation
 }
 
 func goAssessmentViolations(validation ValidationResult, opts AssessmentOptions) []Violation {
-	if !assessmentGateEnabled(opts, AssessmentGateSafety) {
-		return nil
-	}
 	var out []Violation
-	for _, diagnostic := range validation.Diagnostics {
-		out = append(out, Violation{
-			Kind:     "safety_validation_diagnostic",
-			Severity: diagnostic.Severity,
-			Location: diagnostic.Location,
-			Reason:   diagnostic.Message,
-		})
+	if assessmentGateEnabled(opts, AssessmentGateSafety) {
+		for _, diagnostic := range validation.Diagnostics {
+			out = append(out, Violation{
+				Kind:     "safety_validation_diagnostic",
+				Severity: diagnostic.Severity,
+				Location: diagnostic.Location,
+				Reason:   diagnostic.Message,
+			})
+		}
 	}
-	sortViolations(out)
 	return out
 }
 
-func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions int, pressure float64) ScoreSet {
+func goArchitectureViolations(idx *index, opts AssessmentOptions) []Violation {
+	if !assessmentGateEnabled(opts, AssessmentGateArchitecture) || opts.Architecture == nil {
+		return nil
+	}
+	out := make([]Violation, 0)
+	for _, imp := range idx.imports {
+		if rule, denied := deniedArchitectureImport(imp, opts.Architecture.Imports); denied {
+			out = append(out, architectureImportViolation("architecture_denied_import", imp, rule))
+		}
+		if rule, denied := deniedArchitectureImport(imp, opts.Architecture.TestImports); denied {
+			out = append(out, architectureImportViolation("architecture_test_boundary_import", imp, rule))
+		}
+	}
+	return out
+}
+
+func deniedArchitectureImport(imp ImportEdge, rules []ArchitectureImportRule) (ArchitectureImportRule, bool) {
+	rule, ok := selectedArchitectureRule(imp, rules)
+	if !ok {
+		return ArchitectureImportRule{}, false
+	}
+	action := rule.Action
+	if action == "" {
+		action = ArchitectureRuleDeny
+	}
+	return rule, action == ArchitectureRuleDeny
+}
+
+func selectedArchitectureRule(imp ImportEdge, rules []ArchitectureImportRule) (ArchitectureImportRule, bool) {
+	var best ArchitectureImportRule
+	bestSpecificity := -1
+	matched := false
+	for _, rule := range rules {
+		if !architectureRuleMatches(imp, rule) {
+			continue
+		}
+		action := rule.Action
+		if action == "" {
+			action = ArchitectureRuleDeny
+		}
+		if action != ArchitectureRuleAllow && action != ArchitectureRuleDeny {
+			continue
+		}
+		specificity := len(rule.From) + len(rule.To)
+		if !matched || specificity > bestSpecificity || specificity == bestSpecificity && action == ArchitectureRuleDeny && best.Action != ArchitectureRuleDeny {
+			best = rule
+			bestSpecificity = specificity
+			matched = true
+		}
+	}
+	return best, matched
+}
+
+func architectureRuleMatches(imp ImportEdge, rule ArchitectureImportRule) bool {
+	if rule.From != "" && !architectureRulePrefix(rule.From, imp.FromUnit) && !architectureRulePrefix(rule.From, packageDir(imp.FromUnit)) && !architectureRulePrefix(rule.From, imp.FromPath) {
+		return false
+	}
+	if rule.To != "" && !architectureRulePrefix(rule.To, imp.Import) {
+		return false
+	}
+	return true
+}
+
+func architectureRulePrefix(prefix, value string) bool {
+	return value == prefix || strings.HasPrefix(value, prefix+"/") || strings.HasPrefix(value, prefix+"#")
+}
+
+func architectureImportViolation(kind string, imp ImportEdge, rule ArchitectureImportRule) Violation {
+	reason := rule.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("Import %q is denied from %q by architecture rules.", imp.Import, imp.FromUnit)
+	}
+	return Violation{
+		Kind:     kind,
+		Severity: "error",
+		Package:  imp.FromUnit,
+		Location: imp.Location,
+		Reason:   reason,
+	}
+}
+
+func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions int, pressure float64, hasArchitectureRules bool) ScoreSet {
 	boundary := 100 - minAssessmentInt(40, countFindings(findings, "architecture_")*10)
 	testBoundary := 100
+	if hasArchitectureRules {
+		boundary = minAssessmentInt(boundary, 100-minAssessmentInt(70, countViolations(violations, "architecture_denied_import")*25))
+		testBoundary = 100 - minAssessmentInt(70, countViolations(violations, "architecture_test_boundary_import")*25)
+	}
 	coupling := 100 - minAssessmentInt(35, countFindings(findings, "architecture_high_fan_out")*5)
 	sideEffect := 100
 	coverage := 100 - minAssessmentInt(50, countFindings(findings, "coverage_")*25)
@@ -169,6 +254,7 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 	overall := minAssessmentInt(boundary, maintainability)
 	overall = minAssessmentInt(overall, coverage)
 	overall = minAssessmentInt(overall, coupling)
+	overall = minAssessmentInt(overall, testBoundary)
 	overall -= minAssessmentInt(30, len(violations)*10)
 	if overall < 0 {
 		overall = 0
@@ -268,6 +354,16 @@ func countFindings(findings []Finding, prefix string) int {
 	n := 0
 	for _, finding := range findings {
 		if strings.HasPrefix(finding.Kind, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func countViolations(violations []Violation, kind string) int {
+	n := 0
+	for _, violation := range violations {
+		if violation.Kind == kind {
 			n++
 		}
 	}

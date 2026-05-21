@@ -57,6 +57,49 @@ func Target() string {
 	}
 }
 
+func TestCodegateAssessRulesCommand(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "domain/domain.go", `package domain
+
+import "example.com/demo/infra"
+
+func UseInfra() string {
+	return infra.Name
+}
+`)
+	writeFile(t, root, "infra/infra.go", `package infra
+
+const Name = "infra"
+`)
+	rulesPath := filepath.Join(root, "codegate.rules.json")
+	if err := os.WriteFile(rulesPath, []byte(`{
+  "imports": [
+    {
+      "from": "domain",
+      "to": "example.com/demo/infra",
+      "action": "deny",
+      "reason": "domain must not depend on infra"
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "architecture", "--rules", rulesPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"architecture_denied_import"`) || !strings.Contains(got, `"domain must not depend on infra"`) {
+		t.Fatalf("unexpected rules assess output:\n%s", got)
+	}
+}
+
 func TestCodegateAssessRejectsUnknownGate(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")

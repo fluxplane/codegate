@@ -154,6 +154,7 @@ func (a *app) lookupCommand() *cobra.Command {
 func (a *app) assessCommand() *cobra.Command {
 	var limit int
 	var gates []string
+	var rulesPath string
 	cmd := &cobra.Command{
 		Use:   "assess",
 		Short: "Create an agent-readable quality assessment",
@@ -162,7 +163,11 @@ func (a *app) assessCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := a.assess(cmd.Context(), limit, parsedGates)
+			rules, err := loadArchitectureRules(rulesPath)
+			if err != nil {
+				return err
+			}
+			report, err := a.assess(cmd.Context(), limit, parsedGates, rules)
 			if err != nil {
 				return err
 			}
@@ -171,6 +176,7 @@ func (a *app) assessCommand() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "suggestions", 10, "maximum suggestions to include")
 	cmd.Flags().StringSliceVar(&gates, "gate", []string{"all"}, "assessment gate: architecture, maintainability, safety, coverage, or all")
+	cmd.Flags().StringVar(&rulesPath, "rules", "", "architecture rules JSON file")
 	return cmd
 }
 
@@ -227,7 +233,7 @@ func (a *app) cycleCommand() *cobra.Command {
 		Short: "Run assess -> suggest -> optionally apply -> validate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			assessment, err := a.assess(ctx, 20, []codegate.AssessmentGate{codegate.AssessmentGateAll})
+			assessment, err := a.assess(ctx, 20, []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil)
 			if err != nil {
 				return err
 			}
@@ -317,12 +323,12 @@ func (a *app) engine(ctx context.Context) (codegate.Engine, codegate.Scope, erro
 	return eng, codegate.Scope{Language: lang, IncludeTests: a.cfg.includeTests}, nil
 }
 
-func (a *app) assess(ctx context.Context, limit int, gates []codegate.AssessmentGate) (codegate.AssessmentReport, error) {
+func (a *app) assess(ctx context.Context, limit int, gates []codegate.AssessmentGate, rules *codegate.ArchitectureRules) (codegate.AssessmentReport, error) {
 	eng, scope, err := a.engine(ctx)
 	if err != nil {
 		return codegate.AssessmentReport{}, err
 	}
-	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates})
+	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates, Architecture: rules})
 }
 
 func validationKinds(lang codegate.LanguageID) []codegate.ValidationKind {
@@ -369,6 +375,41 @@ func parseAssessmentGates(values []string) ([]codegate.AssessmentGate, error) {
 		return []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil
 	}
 	return out, nil
+}
+
+func loadArchitectureRules(path string) (*codegate.ArchitectureRules, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rules codegate.ArchitectureRules
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return nil, fmt.Errorf("parse architecture rules: %w", err)
+	}
+	if err := validateArchitectureRules(rules.Imports, "imports"); err != nil {
+		return nil, err
+	}
+	if err := validateArchitectureRules(rules.TestImports, "test_imports"); err != nil {
+		return nil, err
+	}
+	return &rules, nil
+}
+
+func validateArchitectureRules(rules []codegate.ArchitectureImportRule, section string) error {
+	for i, rule := range rules {
+		switch rule.Action {
+		case "", codegate.ArchitectureRuleAllow, codegate.ArchitectureRuleDeny:
+		default:
+			return fmt.Errorf("%s[%d] has unsupported action %q", section, i, rule.Action)
+		}
+		if rule.From == "" && rule.To == "" {
+			return fmt.Errorf("%s[%d] must set from, to, or both", section, i)
+		}
+	}
+	return nil
 }
 
 type dirSource struct {

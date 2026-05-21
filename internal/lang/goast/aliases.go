@@ -26,6 +26,9 @@ type (
 	ValidationResult        = core.ValidationResult
 	AssessmentGate          = core.AssessmentGate
 	AssessmentOptions       = core.AssessmentOptions
+	ArchitectureRuleAction  = core.ArchitectureRuleAction
+	ArchitectureRules       = core.ArchitectureRules
+	ArchitectureImportRule  = core.ArchitectureImportRule
 	AssessmentReport        = core.AssessmentReport
 	AssessmentSummary       = core.AssessmentSummary
 	ScoreSet                = core.ScoreSet
@@ -110,6 +113,8 @@ const (
 	AssessmentGateMaintainability = core.AssessmentGateMaintainability
 	AssessmentGateSafety          = core.AssessmentGateSafety
 	AssessmentGateCoverage        = core.AssessmentGateCoverage
+	ArchitectureRuleAllow         = core.ArchitectureRuleAllow
+	ArchitectureRuleDeny          = core.ArchitectureRuleDeny
 )
 
 const (
