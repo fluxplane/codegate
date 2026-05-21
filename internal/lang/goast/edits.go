@@ -68,6 +68,18 @@ func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operat
 		return compiler.compileAddGoStructField(ctx, x)
 	case RemoveGoStructField:
 		return compiler.compileRemoveGoStructField(ctx, x)
+	case RenameGoStructField:
+		return compiler.compileRenameGoStructField(ctx, x)
+	case ChangeGoParameterType:
+		return compiler.compileChangeGoParameterType(ctx, x)
+	case ChangeGoResultType:
+		return compiler.compileChangeGoResultType(ctx, x)
+	case RenameGoReceiver:
+		return compiler.compileRenameGoReceiver(ctx, x)
+	case AddGoInterfaceMethod:
+		return compiler.compileAddGoInterfaceMethod(ctx, x)
+	case RemoveGoInterfaceMethod:
+		return compiler.compileRemoveGoInterfaceMethod(ctx, x)
 	case ExtractGoFunction:
 		return compiler.compileExtractGoFunction(ctx, x)
 	case ExtractGoMethod:
@@ -766,6 +778,177 @@ func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveG
 	return nil, fmt.Errorf("editor: field %q not found", op.Field)
 }
 
+func (c editCompiler) compileRenameGoStructField(ctx context.Context, op RenameGoStructField) ([]FileEdit, error) {
+	if op.OldName == "" || !isValidIdentifier(op.NewName) {
+		return nil, errors.New("editor: RenameGoStructField requires valid OldName and NewName")
+	}
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Struct))
+	if err != nil {
+		return nil, err
+	}
+	sym, pf, st, err := c.resolveStructTypeFromIndex(ctx, idx, op.Struct)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	if structHasField(st, op.NewName) {
+		return nil, fmt.Errorf("editor: field %q already exists", op.NewName)
+	}
+	fieldName, err := findStructFieldName(st, op.OldName)
+	if err != nil {
+		return nil, err
+	}
+	edits := []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: rangeOf(pf.fset, fieldName.Pos(), fieldName.End()), Replacement: op.NewName}}}}
+	usageEdits, err := c.structFieldUsageEdits(ctx, idx, sym, op.OldName, op.NewName, op.UpdateSelectors)
+	if err != nil {
+		return nil, err
+	}
+	return mergeFileEdits(append(edits, usageEdits...)), nil
+}
+
+func (c editCompiler) compileChangeGoParameterType(ctx context.Context, op ChangeGoParameterType) ([]FileEdit, error) {
+	if op.Name == "" || strings.TrimSpace(op.Type) == "" {
+		return nil, errors.New("editor: ChangeGoParameterType requires Name and Type")
+	}
+	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	r, err := namedFieldTypeRange(pf.fset, fn.Type.Params, op.Name, "parameter")
+	if err != nil {
+		return nil, err
+	}
+	return []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: r, Replacement: strings.TrimSpace(op.Type)}}}}, nil
+}
+
+func (c editCompiler) compileChangeGoResultType(ctx context.Context, op ChangeGoResultType) ([]FileEdit, error) {
+	if strings.TrimSpace(op.Type) == "" {
+		return nil, errors.New("editor: ChangeGoResultType requires Type")
+	}
+	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	var r Range
+	if op.Name != "" {
+		r, err = namedFieldTypeRange(pf.fset, fn.Type.Results, op.Name, "result")
+	} else {
+		r, err = resultTypeRange(pf.fset, fn.Type.Results, op.Position)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: r, Replacement: strings.TrimSpace(op.Type)}}}}, nil
+}
+
+func (c editCompiler) compileRenameGoReceiver(ctx context.Context, op RenameGoReceiver) ([]FileEdit, error) {
+	if !isValidIdentifier(op.NewName) {
+		return nil, fmt.Errorf("editor: invalid Go receiver name %q", op.NewName)
+	}
+	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if sym.Kind != SymbolMethod || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return nil, errors.New("editor: RenameGoReceiver requires a method target")
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	recv := fn.Recv.List[0]
+	if len(recv.Names) != 1 {
+		return nil, errors.New("editor: method receiver must have exactly one name")
+	}
+	oldName := recv.Names[0].Name
+	if oldName == op.NewName {
+		return nil, nil
+	}
+	edits := []TextEdit{{Path: pf.path, Range: rangeOf(pf.fset, recv.Names[0].Pos(), recv.Names[0].End()), Replacement: op.NewName}}
+	if fn.Body != nil {
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if ok && id.Name == oldName {
+				edits = append(edits, TextEdit{Path: pf.path, Range: rangeOf(pf.fset, id.Pos(), id.End()), Replacement: op.NewName})
+			}
+			return true
+		})
+	}
+	return []FileEdit{{Path: pf.path, Edits: edits}}, nil
+}
+
+func (c editCompiler) compileAddGoInterfaceMethod(ctx context.Context, op AddGoInterfaceMethod) ([]FileEdit, error) {
+	method := strings.TrimSpace(op.Method)
+	if method == "" {
+		return nil, errors.New("editor: AddGoInterfaceMethod requires Method")
+	}
+	sym, pf, iface, err := c.resolveInterfaceType(ctx, op.Interface)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	name, err := interfaceMethodName(method)
+	if err != nil {
+		return nil, err
+	}
+	if interfaceHasMethod(iface, name) {
+		return nil, fmt.Errorf("editor: interface method %q already exists", name)
+	}
+	edit := insertStructFieldEdit(pf.fset, iface.Methods.Opening, iface.Methods.Closing, fieldRanges(pf.fset, iface.Methods), op.Position, method)
+	edit.Path = pf.path
+	return []FileEdit{{Path: pf.path, Edits: []TextEdit{edit}}}, nil
+}
+
+func (c editCompiler) compileRemoveGoInterfaceMethod(ctx context.Context, op RemoveGoInterfaceMethod) ([]FileEdit, error) {
+	if op.Method == "" {
+		return nil, errors.New("editor: RemoveGoInterfaceMethod requires Method")
+	}
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Interface))
+	if err != nil {
+		return nil, err
+	}
+	sym, pf, iface, err := c.resolveInterfaceTypeFromIndex(ctx, idx, op.Interface)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	var methodSym Symbol
+	for _, child := range sym.Children {
+		if child.Name == op.Method {
+			methodSym = child
+			break
+		}
+	}
+	if methodSym.ID == "" {
+		return nil, fmt.Errorf("editor: interface method %q not found", op.Method)
+	}
+	for _, occ := range idx.occurrences {
+		if occ.SymbolID == methodSym.ID && occ.Kind != OccurrenceDeclaration {
+			return nil, fmt.Errorf("editor: interface method %q has indexed references", op.Method)
+		}
+	}
+	for _, method := range iface.Methods.List {
+		for _, name := range method.Names {
+			if name.Name == op.Method {
+				r := expandLineRange(pf.src, rangeOf(pf.fset, method.Pos(), method.End()))
+				return []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: r, Replacement: ""}}}}, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("editor: interface method %q not found", op.Method)
+}
+
 func (c editCompiler) compileExtractGoFunction(ctx context.Context, op ExtractGoFunction) ([]FileEdit, error) {
 	return c.compileExtract(ctx, op.Path, op.Range, "", op.Name, op.Params, op.Results, op.InsertAfter, op.ReplaceWithCall)
 }
@@ -990,6 +1173,115 @@ func (c editCompiler) resolveStructTypeFromIndex(ctx context.Context, idx *index
 	return Symbol{}, parsedFile{}, nil, errors.New("editor: struct declaration not found")
 }
 
+func (c editCompiler) resolveInterfaceType(ctx context.Context, sel SymbolSelector) (Symbol, parsedFile, *ast.InterfaceType, error) {
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(sel))
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	return c.resolveInterfaceTypeFromIndex(ctx, idx, sel)
+}
+
+func (c editCompiler) resolveInterfaceTypeFromIndex(ctx context.Context, idx *index, sel SymbolSelector) (Symbol, parsedFile, *ast.InterfaceType, error) {
+	if sel.Kind == "" {
+		sel.Kind = SymbolInterface
+	}
+	sym, err := exactSymbol(idx, sel, "interface")
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	if sym.Kind != SymbolInterface {
+		return Symbol{}, parsedFile{}, nil, errors.New("editor: target must be an interface")
+	}
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	pf, err := parseOne(sym.Location.URI, src)
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	for _, decl := range pf.file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || ts.Name.Name != sym.Name {
+				continue
+			}
+			iface, ok := ts.Type.(*ast.InterfaceType)
+			if !ok {
+				return Symbol{}, parsedFile{}, nil, errors.New("editor: target is not an interface")
+			}
+			return sym, pf, iface, nil
+		}
+	}
+	return Symbol{}, parsedFile{}, nil, errors.New("editor: interface declaration not found")
+}
+
+func structHasField(st *ast.StructType, fieldName string) bool {
+	for _, field := range st.Fields.List {
+		for _, name := range field.Names {
+			if name.Name == fieldName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func findStructFieldName(st *ast.StructType, fieldName string) (*ast.Ident, error) {
+	for _, field := range st.Fields.List {
+		for _, name := range field.Names {
+			if name.Name == fieldName {
+				return name, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("editor: field %q not found", fieldName)
+}
+
+func interfaceHasMethod(iface *ast.InterfaceType, methodName string) bool {
+	for _, method := range iface.Methods.List {
+		for _, name := range method.Names {
+			if name.Name == methodName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func interfaceMethodName(method string) (string, error) {
+	src := "package p\ntype T interface {\n" + method + "\n}\n"
+	pf, err := parseOne("method.go", []byte(src))
+	if err != nil {
+		return "", err
+	}
+	for _, decl := range pf.file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			iface, ok := ts.Type.(*ast.InterfaceType)
+			if !ok || len(iface.Methods.List) != 1 {
+				continue
+			}
+			if len(iface.Methods.List[0].Names) != 1 {
+				return "", errors.New("editor: interface Method must declare exactly one named method")
+			}
+			return iface.Methods.List[0].Names[0].Name, nil
+		}
+	}
+	return "", errors.New("editor: invalid interface method")
+}
+
 func paramRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
 	if fields == nil {
 		return nil
@@ -1090,6 +1382,109 @@ func removeGroupedNameReplacement(src []byte, r Range) string {
 		return " "
 	}
 	return ""
+}
+
+func namedFieldTypeRange(fset *token.FileSet, fields *ast.FieldList, name, label string) (Range, error) {
+	if fields == nil {
+		return Range{}, fmt.Errorf("editor: %s %q not found", label, name)
+	}
+	for _, field := range fields.List {
+		for _, candidate := range field.Names {
+			if candidate.Name != name {
+				continue
+			}
+			if len(field.Names) > 1 {
+				return Range{}, fmt.Errorf("editor: cannot change type for grouped %s %q", label, name)
+			}
+			if field.Type == nil {
+				return Range{}, fmt.Errorf("editor: %s %q has no type", label, name)
+			}
+			return rangeOf(fset, field.Type.Pos(), field.Type.End()), nil
+		}
+	}
+	return Range{}, fmt.Errorf("editor: %s %q not found", label, name)
+}
+
+func resultTypeRange(fset *token.FileSet, fields *ast.FieldList, pos int) (Range, error) {
+	if fields == nil || pos < 0 {
+		return Range{}, fmt.Errorf("editor: result position %d not found", pos)
+	}
+	i := 0
+	for _, field := range fields.List {
+		count := 1
+		if len(field.Names) > 0 {
+			count = len(field.Names)
+		}
+		for n := 0; n < count; n++ {
+			if i == pos {
+				if count > 1 {
+					return Range{}, fmt.Errorf("editor: cannot change type for grouped result at position %d", pos)
+				}
+				if field.Type == nil {
+					return Range{}, fmt.Errorf("editor: result at position %d has no type", pos)
+				}
+				return rangeOf(fset, field.Type.Pos(), field.Type.End()), nil
+			}
+			i++
+		}
+	}
+	return Range{}, fmt.Errorf("editor: result position %d not found", pos)
+}
+
+func (c editCompiler) structFieldUsageEdits(ctx context.Context, idx *index, sym Symbol, oldName, newName string, updateSelectors bool) ([]FileEdit, error) {
+	byPath := map[string][]TextEdit{}
+	for _, file := range idx.unitFiles[sym.UnitID] {
+		src, err := c.snapshot.ReadFile(ctx, file)
+		if err != nil {
+			return nil, err
+		}
+		pf, err := parseOne(file, src)
+		if err != nil {
+			return nil, err
+		}
+		ast.Inspect(pf.file, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.CompositeLit:
+				if !isCompositeTypeName(x.Type, sym.Name) {
+					return true
+				}
+				for _, elt := range x.Elts {
+					kv, ok := elt.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					key, ok := kv.Key.(*ast.Ident)
+					if ok && key.Name == oldName {
+						byPath[file] = append(byPath[file], TextEdit{Path: file, Range: rangeOf(pf.fset, key.Pos(), key.End()), Replacement: newName})
+					}
+				}
+			case *ast.SelectorExpr:
+				if updateSelectors && x.Sel.Name == oldName {
+					byPath[file] = append(byPath[file], TextEdit{Path: file, Range: rangeOf(pf.fset, x.Sel.Pos(), x.Sel.End()), Replacement: newName})
+				}
+			}
+			return true
+		})
+	}
+	var out []FileEdit
+	for p, edits := range byPath {
+		out = append(out, FileEdit{Path: p, Edits: edits})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+func isCompositeTypeName(expr ast.Expr, name string) bool {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x.Name == name
+	case *ast.SelectorExpr:
+		return x.Sel.Name == name
+	case *ast.StarExpr:
+		return isCompositeTypeName(x.X, name)
+	default:
+		return false
+	}
 }
 
 func (c editCompiler) callArgumentEdits(ctx context.Context, idx *index, target Symbol, pos int, value string, add bool) ([]FileEdit, error) {

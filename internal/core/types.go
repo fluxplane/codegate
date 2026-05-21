@@ -418,6 +418,12 @@ const (
 	OpRenameGoParam   OperationKind = "go_parameter_rename"
 	OpAddGoField      OperationKind = "go_struct_field_add"
 	OpRemoveGoField   OperationKind = "go_struct_field_remove"
+	OpRenameGoField   OperationKind = "go_struct_field_rename"
+	OpChangeGoParam   OperationKind = "go_parameter_type_change"
+	OpChangeGoResult  OperationKind = "go_result_type_change"
+	OpRenameGoRecv    OperationKind = "go_receiver_rename"
+	OpAddGoIfaceMeth  OperationKind = "go_interface_method_add"
+	OpRemoveGoIface   OperationKind = "go_interface_method_remove"
 	OpExtractGoFunc   OperationKind = "go_function_extract"
 	OpExtractGoMethod OperationKind = "go_method_extract"
 )
@@ -612,6 +618,60 @@ type RemoveGoStructField struct {
 }
 
 func (RemoveGoStructField) Kind() OperationKind { return OpRemoveGoField }
+
+type RenameGoStructField struct {
+	Struct          SymbolSelector
+	OldName         string
+	NewName         string
+	UpdateSelectors bool
+	ExpectedHash    string
+}
+
+func (RenameGoStructField) Kind() OperationKind { return OpRenameGoField }
+
+type ChangeGoParameterType struct {
+	Target       SymbolSelector
+	Name         string
+	Type         string
+	ExpectedHash string
+}
+
+func (ChangeGoParameterType) Kind() OperationKind { return OpChangeGoParam }
+
+type ChangeGoResultType struct {
+	Target       SymbolSelector
+	Name         string
+	Position     int
+	Type         string
+	ExpectedHash string
+}
+
+func (ChangeGoResultType) Kind() OperationKind { return OpChangeGoResult }
+
+type RenameGoReceiver struct {
+	Target       SymbolSelector
+	NewName      string
+	ExpectedHash string
+}
+
+func (RenameGoReceiver) Kind() OperationKind { return OpRenameGoRecv }
+
+type AddGoInterfaceMethod struct {
+	Interface    SymbolSelector
+	Method       string
+	Position     int
+	ExpectedHash string
+}
+
+func (AddGoInterfaceMethod) Kind() OperationKind { return OpAddGoIfaceMeth }
+
+type RemoveGoInterfaceMethod struct {
+	Interface    SymbolSelector
+	Method       string
+	ExpectedHash string
+}
+
+func (RemoveGoInterfaceMethod) Kind() OperationKind { return OpRemoveGoIface }
 
 type ExtractGoFunction struct {
 	Path            string

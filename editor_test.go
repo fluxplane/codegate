@@ -1091,6 +1091,251 @@ func Use(user User) string {
 	}
 }
 
+func TestRenameGoStructFieldUpdatesKeyedLiteralsAndOptionalSelectors(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"user.go": `package demo
+
+type User struct {
+	Email string
+	First, Last string
+}
+
+func NewUser() User {
+	return User{Email: "a", Last: "b"}
+}
+
+func Read(user User) string {
+	return user.Email
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameGoStructField{
+		Struct:          SymbolSelector{Name: "User", Kind: SymbolStruct},
+		OldName:         "Email",
+		NewName:         "Address",
+		UpdateSelectors: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, RenameGoStructField{
+		Struct:  SymbolSelector{Name: "User", Kind: SymbolStruct},
+		OldName: "Last",
+		NewName: "Surname",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	for _, want := range []string{
+		"Address",
+		"First, Surname string",
+		"User{Address: \"a\", Surname: \"b\"}",
+		"return user.Address",
+	} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("field rename output missing %q:\n%s", want, after)
+		}
+	}
+	for _, gone := range []string{"Email string", "Last string", "Email:", "Last:", "user.Email"} {
+		if strings.Contains(after, gone) {
+			t.Fatalf("field rename output still contains %q:\n%s", gone, after)
+		}
+	}
+}
+
+func TestChangeGoSignatureTypesAndReceiver(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+type Store struct{}
+
+func Target(name string, count int) (value string, err error) {
+	return name, nil
+}
+
+func (s *Store) Load(id string) string {
+	return s.load(id)
+}
+
+func (s *Store) load(id string) string {
+	return id
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx,
+		ChangeGoParameterType{
+			Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+			Name:   "count",
+			Type:   "int64",
+		},
+		ChangeGoResultType{
+			Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+			Name:   "value",
+			Type:   "[]byte",
+		},
+		RenameGoReceiver{
+			Target:  SymbolSelector{Name: "Load", Kind: SymbolMethod, Container: "Store"},
+			NewName: "store",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	for _, want := range []string{
+		"func Target(name string, count int64) (value []byte, err error)",
+		"func (store *Store) Load(id string) string",
+		"return store.load(id)",
+		"func (s *Store) load(id string) string",
+	} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("signature/receiver output missing %q:\n%s", want, after)
+		}
+	}
+}
+
+func TestChangeGoResultTypeByPosition(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target() (string, error) {
+	return "", nil
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ChangeGoResultType{
+		Target:   SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Position: 0,
+		Type:     "[]byte",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if !strings.Contains(after, "func Target() ([]byte, error)") {
+		t.Fatalf("positional result type change failed:\n%s", after)
+	}
+}
+
+func TestChangeGoParameterTypeRejectsGroupedNames(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target(first, second string) {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	err := changes.Apply(ctx, ChangeGoParameterType{
+		Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Name:   "second",
+		Type:   "[]byte",
+	})
+	if err == nil {
+		t.Fatal("expected grouped parameter type change to fail")
+	}
+	if !strings.Contains(err.Error(), "grouped parameter") {
+		t.Fatalf("expected grouped parameter error, got %v", err)
+	}
+}
+
+func TestGoInterfaceMethodOperations(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+type Store interface {
+	Get(id string) string
+	Delete(id string) error
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, AddGoInterfaceMethod{
+		Interface: SymbolSelector{Name: "Store", Kind: SymbolInterface},
+		Method:    "List() []string",
+		Position:  1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, RemoveGoInterfaceMethod{
+		Interface: SymbolSelector{Name: "Store", Kind: SymbolInterface},
+		Method:    "Delete",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if !strings.Contains(after, "Get(id string) string") || !strings.Contains(after, "List() []string") || strings.Contains(after, "Delete(id string) error") {
+		t.Fatalf("interface method operations failed:\n%s", after)
+	}
+}
+
+func TestRemoveGoInterfaceMethodRejectsReferences(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+type Store interface {
+	Get(id string) string
+}
+
+func Use(store Store) string {
+	return store.Get("a")
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	err := changes.Apply(ctx, RemoveGoInterfaceMethod{
+		Interface: SymbolSelector{Name: "Store", Kind: SymbolInterface},
+		Method:    "Get",
+	})
+	if err == nil {
+		t.Fatal("expected referenced interface method removal to fail")
+	}
+	if !strings.Contains(err.Error(), "indexed references") {
+		t.Fatalf("expected reference error, got %v", err)
+	}
+}
+
+func TestNewGoRefactorsRejectStaleAndConflictingEdits(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+type User struct {
+	Email string
+	Name string
+}
+
+func Target(name string) string {
+	return name
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ChangeGoParameterType{
+		Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Name:         "name",
+		Type:         "[]byte",
+		ExpectedHash: "stale",
+	}); err == nil {
+		t.Fatal("expected stale signature type change to fail")
+	}
+	if err := changes.Apply(ctx, RenameGoStructField{
+		Struct:  SymbolSelector{Name: "User", Kind: SymbolStruct},
+		OldName: "Email",
+		NewName: "Name",
+	}); err == nil {
+		t.Fatal("expected conflicting field rename to fail")
+	}
+	if files := mustFiles(t, changes, ctx); len(files) != 0 {
+		t.Fatalf("rejected refactors should not change files: %#v", files)
+	}
+}
+
 func TestExtractGoFunctionAndMethod(t *testing.T) {
 	ctx := context.Background()
 	src := `package demo

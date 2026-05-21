@@ -564,7 +564,7 @@ func (e *Editor) backendForPath(filePath string) (Backend, bool) {
 
 func (e *Editor) backendForOperation(op Operation) (Backend, error) {
 	switch op.Kind() {
-	case OpRenameSymbol, OpReplaceSymbol, OpDeleteSymbol, OpAppendSymbol, OpReplaceFunction, OpAppendFunction, OpDeleteFunction, OpReplaceMethod, OpDeleteMethod, OpReplaceComment, OpEnsureStructTag, OpRemoveStructTag, OpEnsureGoImport, OpRemoveGoImport, OpRenameGoImport, OpMoveSymbol, OpAddGoParameter, OpRemoveGoParam, OpRenameGoParam, OpAddGoField, OpRemoveGoField, OpExtractGoFunc, OpExtractGoMethod:
+	case OpRenameSymbol, OpReplaceSymbol, OpDeleteSymbol, OpAppendSymbol, OpReplaceFunction, OpAppendFunction, OpDeleteFunction, OpReplaceMethod, OpDeleteMethod, OpReplaceComment, OpEnsureStructTag, OpRemoveStructTag, OpEnsureGoImport, OpRemoveGoImport, OpRenameGoImport, OpMoveSymbol, OpAddGoParameter, OpRemoveGoParam, OpRenameGoParam, OpAddGoField, OpRemoveGoField, OpRenameGoField, OpChangeGoParam, OpChangeGoResult, OpRenameGoRecv, OpAddGoIfaceMeth, OpRemoveGoIface, OpExtractGoFunc, OpExtractGoMethod:
 		if backend, ok := e.backends[Go]; ok {
 			return backend, nil
 		}

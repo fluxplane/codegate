@@ -3,33 +3,39 @@ package editor
 import "github.com/codewandler/editor/internal/core"
 
 type (
-	Operation           = core.Operation
-	OperationKind       = core.OperationKind
-	TextEdit            = core.TextEdit
-	FileEdit            = core.FileEdit
-	ReplaceFunction     = core.ReplaceFunction
-	ReplaceSymbol       = core.ReplaceSymbol
-	RenameSymbol        = core.RenameSymbol
-	AppendFunction      = core.AppendFunction
-	AppendSymbol        = core.AppendSymbol
-	DeleteSymbol        = core.DeleteSymbol
-	DeleteFunction      = core.DeleteFunction
-	ReplaceMethod       = core.ReplaceMethod
-	DeleteMethod        = core.DeleteMethod
-	ReplaceComment      = core.ReplaceComment
-	EnsureGoStructTag   = core.EnsureGoStructTag
-	RemoveGoStructTag   = core.RemoveGoStructTag
-	EnsureGoImport      = core.EnsureGoImport
-	RemoveGoImport      = core.RemoveGoImport
-	RenameGoImport      = core.RenameGoImport
-	MoveSymbol          = core.MoveSymbol
-	AddGoParameter      = core.AddGoParameter
-	RemoveGoParameter   = core.RemoveGoParameter
-	RenameGoParameter   = core.RenameGoParameter
-	AddGoStructField    = core.AddGoStructField
-	RemoveGoStructField = core.RemoveGoStructField
-	ExtractGoFunction   = core.ExtractGoFunction
-	ExtractGoMethod     = core.ExtractGoMethod
+	Operation               = core.Operation
+	OperationKind           = core.OperationKind
+	TextEdit                = core.TextEdit
+	FileEdit                = core.FileEdit
+	ReplaceFunction         = core.ReplaceFunction
+	ReplaceSymbol           = core.ReplaceSymbol
+	RenameSymbol            = core.RenameSymbol
+	AppendFunction          = core.AppendFunction
+	AppendSymbol            = core.AppendSymbol
+	DeleteSymbol            = core.DeleteSymbol
+	DeleteFunction          = core.DeleteFunction
+	ReplaceMethod           = core.ReplaceMethod
+	DeleteMethod            = core.DeleteMethod
+	ReplaceComment          = core.ReplaceComment
+	EnsureGoStructTag       = core.EnsureGoStructTag
+	RemoveGoStructTag       = core.RemoveGoStructTag
+	EnsureGoImport          = core.EnsureGoImport
+	RemoveGoImport          = core.RemoveGoImport
+	RenameGoImport          = core.RenameGoImport
+	MoveSymbol              = core.MoveSymbol
+	AddGoParameter          = core.AddGoParameter
+	RemoveGoParameter       = core.RemoveGoParameter
+	RenameGoParameter       = core.RenameGoParameter
+	AddGoStructField        = core.AddGoStructField
+	RemoveGoStructField     = core.RemoveGoStructField
+	RenameGoStructField     = core.RenameGoStructField
+	ChangeGoParameterType   = core.ChangeGoParameterType
+	ChangeGoResultType      = core.ChangeGoResultType
+	RenameGoReceiver        = core.RenameGoReceiver
+	AddGoInterfaceMethod    = core.AddGoInterfaceMethod
+	RemoveGoInterfaceMethod = core.RemoveGoInterfaceMethod
+	ExtractGoFunction       = core.ExtractGoFunction
+	ExtractGoMethod         = core.ExtractGoMethod
 )
 
 const (
@@ -55,6 +61,12 @@ const (
 	OpRenameGoParam   = core.OpRenameGoParam
 	OpAddGoField      = core.OpAddGoField
 	OpRemoveGoField   = core.OpRemoveGoField
+	OpRenameGoField   = core.OpRenameGoField
+	OpChangeGoParam   = core.OpChangeGoParam
+	OpChangeGoResult  = core.OpChangeGoResult
+	OpRenameGoRecv    = core.OpRenameGoRecv
+	OpAddGoIfaceMeth  = core.OpAddGoIfaceMeth
+	OpRemoveGoIface   = core.OpRemoveGoIface
 	OpExtractGoFunc   = core.OpExtractGoFunc
 	OpExtractGoMethod = core.OpExtractGoMethod
 )
