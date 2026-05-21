@@ -37,5 +37,5 @@ language packages, Markdown cleanup, and agentruntime source adapter.
 Tag placeholder:
 
 ```sh
-git tag v0.1.0
+git tag -a v0.1.0 -m "v0.1.0"
 ```
