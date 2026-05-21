@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.0 - 2026-05-21
+
+### Changed
+
+- Renamed the Go module from `github.com/codewandler/codegate` to `github.com/fluxplane/codegate`.
+
+### Added
+
+- Generic `codegate op run` CLI operation runner for agent-driven structured edit operations.
+- Go module path rename operation with dry-run, patch, validation, and explicit write support.
+- Agent release instructions in `AGENTS.md`.
+
+### Fixed
+
+- Hardened Go module path literal rewrites so unrelated substrings such as longer path tokens are not modified.
+- Added package-local test coverage across internal helpers, Go backend module rename behavior, Markdown indexing, and public language wrappers.
+
 ## v0.1.0 - 2026-05-21
 
 First public release of `github.com/fluxplane/codegate`.
