@@ -43,6 +43,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - add or remove Go interface methods
   - extract Go functions or methods from explicit source ranges
 - Unified diff preview before commit.
+- Pending change-set validation before commit.
 - Conservative safety guards for generated files, shadowing-prone parameter edits, ambiguous field selectors, and unsupported signature call sites.
 - Refactoring proposals for simple AST-derived signals:
   - unused private symbols

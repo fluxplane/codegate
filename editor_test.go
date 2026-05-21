@@ -1659,6 +1659,111 @@ func Name() string {
 	}
 }
 
+func TestChangeSetValidateUsesPendingOverlay(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target() string {
+	return "old"
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ReplaceFunction{
+		Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Source: `func Target() string {
+	return "new"
+}
+`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := changes.Validate(ctx, ValidationOptions{Kinds: []ValidationKind{ValidationParse, ValidationTypecheck}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Passed || len(result.Diagnostics) != 0 || result.ResolutionMode != "typecheck" {
+		t.Fatalf("expected pending overlay validation to pass, got %#v", result)
+	}
+	diff, err := changes.Diff(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, `return "new"`) {
+		t.Fatalf("expected pending diff to include replacement:\n%s", diff)
+	}
+	fragment, err := ed.ReadSymbol(ctx, SymbolSelector{Name: "Target", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fragment.Source, `"new"`) {
+		t.Fatalf("editor state changed before commit:\n%s", fragment.Source)
+	}
+}
+
+func TestChangeSetValidateReportsPendingParseDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target() string {
+	return "old"
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	changes.overlay["demo.go"] = []byte("package demo\n\nfunc Target( {\n}\n")
+	changes.changed["demo.go"] = true
+
+	result, err := changes.Validate(ctx, ValidationOptions{Kinds: []ValidationKind{ValidationParse}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Passed || len(result.Diagnostics) == 0 {
+		t.Fatalf("expected pending parse validation failure, got %#v", result)
+	}
+	if len(result.AffectedPaths) != 1 || result.AffectedPaths[0] != "demo.go" {
+		t.Fatalf("unexpected validation paths: %#v", result.AffectedPaths)
+	}
+}
+
+func TestChangeSetValidateReportsPendingTypecheckDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target() string {
+	return "old"
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ReplaceFunction{
+		Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Source: `func Target() string {
+	return 1
+}
+`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := changes.Validate(ctx, ValidationOptions{Kinds: []ValidationKind{ValidationTypecheck}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Passed || len(result.Diagnostics) == 0 || result.ResolutionMode != "typecheck" {
+		t.Fatalf("expected pending typecheck validation failure, got %#v", result)
+	}
+	fragment, err := ed.ReadSymbol(ctx, SymbolSelector{Name: "Target", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fragment.Source, "return 1") {
+		t.Fatalf("editor state changed before commit:\n%s", fragment.Source)
+	}
+}
+
 func TestExtractGoFunctionAndMethod(t *testing.T) {
 	ctx := context.Background()
 	src := `package demo

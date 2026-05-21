@@ -424,6 +424,10 @@ func (e *Editor) Metrics(ctx context.Context, scope Scope) (Metrics, error) {
 }
 
 func (e *Editor) Validate(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
+	return e.validate(ctx, opts, nil)
+}
+
+func (e *Editor) validate(ctx context.Context, opts ValidationOptions, overlay map[string][]byte) (ValidationResult, error) {
 	kinds := normalizeValidationKinds(opts.Kinds)
 	opts.Kinds = kinds
 	result := ValidationResult{
@@ -445,7 +449,7 @@ func (e *Editor) Validate(ctx context.Context, opts ValidationOptions) (Validati
 			result.Diagnostics = append(result.Diagnostics, Diagnostic{Severity: "warning", Message: fmt.Sprintf("backend %q does not support validation", spec.Name)})
 			continue
 		}
-		next, err := validator.Validate(ctx, e.snapshot(nil), opts)
+		next, err := validator.Validate(ctx, e.snapshot(overlay), opts)
 		if err != nil {
 			return ValidationResult{}, err
 		}

@@ -205,11 +205,15 @@ type validationPackage struct {
 
 func typecheckDiagnostics(files []validationFile, modulePath string) []Diagnostic {
 	packages := validationPackages(files, modulePath)
+	externalImports := externalImportPaths(files, modulePath)
+	externalAliases := externalImportAliases(files, modulePath)
 	importer := &validationImporter{
-		packages: packages,
-		std:      importer.Default(),
-		checked:  map[string]*types.Package{},
-		checking: map[string]bool{},
+		packages:        packages,
+		externalImports: externalImports,
+		externalAliases: externalAliases,
+		std:             importer.Default(),
+		checked:         map[string]*types.Package{},
+		checking:        map[string]bool{},
 	}
 	units := make([]string, 0, len(packages))
 	for unit := range packages {
@@ -271,11 +275,13 @@ func readModulePath(ctx context.Context, snapshot Snapshot) (string, error) {
 }
 
 type validationImporter struct {
-	packages    map[string]validationPackage
-	std         types.Importer
-	checked     map[string]*types.Package
-	checking    map[string]bool
-	diagnostics []Diagnostic
+	packages        map[string]validationPackage
+	externalImports map[string]bool
+	externalAliases map[string]bool
+	std             types.Importer
+	checked         map[string]*types.Package
+	checking        map[string]bool
+	diagnostics     []Diagnostic
 }
 
 func (i *validationImporter) Import(path string) (*types.Package, error) {
@@ -284,7 +290,11 @@ func (i *validationImporter) Import(path string) (*types.Package, error) {
 			return i.check(unit), nil
 		}
 	}
-	return i.std.Import(path)
+	pkg, err := i.std.Import(path)
+	if err != nil && i.externalImports[path] {
+		return types.NewPackage(path, pathBase(path)), nil
+	}
+	return pkg, err
 }
 
 func (i *validationImporter) check(unit string) *types.Package {
@@ -320,12 +330,15 @@ func (i *validationImporter) check(unit string) *types.Package {
 	cfg := types.Config{
 		Importer: i,
 		Error: func(err error) {
+			if ignoredExternalTypeError(err, i.externalAliases) {
+				return
+			}
 			collected++
 			i.diagnostics = append(i.diagnostics, typeErrorDiagnostic(err))
 		},
 	}
 	pkg, err := cfg.Check(pkgInfo.importPath, fset, asts, nil)
-	if err != nil && collected == 0 {
+	if err != nil && collected == 0 && !ignoredExternalTypeError(err, i.externalAliases) {
 		i.diagnostics = append(i.diagnostics, typeErrorDiagnostic(err))
 	}
 	if pkg == nil {
@@ -333,6 +346,66 @@ func (i *validationImporter) check(unit string) *types.Package {
 	}
 	i.checked[unit] = pkg
 	return pkg
+}
+
+func externalImportPaths(files []validationFile, modulePath string) map[string]bool {
+	out := map[string]bool{}
+	for _, vf := range files {
+		for _, imp := range vf.file.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if isExternalModuleImport(importPath, modulePath) {
+				out[importPath] = true
+			}
+		}
+	}
+	return out
+}
+
+func externalImportAliases(files []validationFile, modulePath string) map[string]bool {
+	out := map[string]bool{}
+	for _, vf := range files {
+		for _, imp := range vf.file.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if !isExternalModuleImport(importPath, modulePath) {
+				continue
+			}
+			alias := importAlias(imp)
+			local := importLocalName(importPath, alias)
+			if local != "" {
+				out[local] = true
+			}
+		}
+	}
+	return out
+}
+
+func isExternalModuleImport(importPath, modulePath string) bool {
+	if modulePath != "" && (importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/")) {
+		return false
+	}
+	first := importPath
+	if i := strings.IndexByte(first, '/'); i >= 0 {
+		first = first[:i]
+	}
+	return strings.Contains(first, ".")
+}
+
+func ignoredExternalTypeError(err error, aliases map[string]bool) bool {
+	te, ok := err.(types.Error)
+	if !ok {
+		return false
+	}
+	const prefix = "undefined: "
+	if !strings.HasPrefix(te.Msg, prefix) {
+		return false
+	}
+	name := strings.TrimPrefix(te.Msg, prefix)
+	for alias := range aliases {
+		if name == alias || strings.HasPrefix(name, alias+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func pathBase(p string) string {

@@ -48,6 +48,13 @@ func (c *ChangeSet) Read(ctx context.Context, sel SymbolSelector) (SourceFragmen
 	return c.editor.readSymbol(ctx, sel, c.overlay)
 }
 
+func (c *ChangeSet) Validate(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
+	if c.closed {
+		return ValidationResult{}, errors.New("editor: changeset is closed")
+	}
+	return c.editor.validate(ctx, opts, c.overlay)
+}
+
 func (c *ChangeSet) Diff(ctx context.Context) (string, error) {
 	if ctx.Err() != nil {
 		return "", ctx.Err()
