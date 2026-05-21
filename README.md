@@ -276,6 +276,24 @@ Upcoming work:
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
 7. Add Markdown edit/refactor operations for deterministic documentation fixes.
 
+## Release Readiness
+
+Current publish posture:
+
+- Module path and public package name are `github.com/codewandler/codegate`.
+- The preferred public entrypoint is `codegate.New()` with explicit language registration.
+- Built-in language backends are exposed through `language/golang` and `language/markdown`.
+- `codegate.NewEngine()` remains as a compatibility alias for the engine builder.
+- `codegate.NewEditor()` remains available for lower-level direct edit workflows.
+
+Known pre-`v0.1.0` limitations:
+
+- Multiple workspace roots are rejected.
+- Go analysis is AST-first with best-effort typecheck validation, not full package loading.
+- Markdown support is structural and read-only.
+- CLI output is JSON-only.
+- Release tags and external module consumers have not been exercised yet.
+
 ## Non-goals
 
 - No hidden disk IO in core.

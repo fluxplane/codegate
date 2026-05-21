@@ -11,6 +11,8 @@ import (
 	"github.com/codewandler/codegate/internal/core"
 )
 
+// ChangeSet holds in-memory edits until callers inspect, validate, commit, or
+// discard them.
 type ChangeSet struct {
 	editor  *Editor
 	overlay map[string][]byte
@@ -18,6 +20,8 @@ type ChangeSet struct {
 	closed  bool
 }
 
+// Apply compiles semantic operations into text edits and applies them to the
+// pending in-memory overlay.
 func (c *ChangeSet) Apply(ctx context.Context, ops ...Operation) error {
 	if c.closed {
 		return errors.New("codegate: changeset is closed")
@@ -41,6 +45,7 @@ func (c *ChangeSet) Apply(ctx context.Context, ops ...Operation) error {
 	return nil
 }
 
+// Read returns a source fragment from the pending change-set view.
 func (c *ChangeSet) Read(ctx context.Context, sel SymbolSelector) (SourceFragment, error) {
 	if c.closed {
 		return SourceFragment{}, errors.New("codegate: changeset is closed")
@@ -48,6 +53,7 @@ func (c *ChangeSet) Read(ctx context.Context, sel SymbolSelector) (SourceFragmen
 	return c.editor.readSymbol(ctx, sel, c.overlay)
 }
 
+// Validate runs backend validation against the pending change-set view.
 func (c *ChangeSet) Validate(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
 	if c.closed {
 		return ValidationResult{}, errors.New("codegate: changeset is closed")
@@ -55,6 +61,7 @@ func (c *ChangeSet) Validate(ctx context.Context, opts ValidationOptions) (Valid
 	return c.editor.validate(ctx, opts, c.overlay)
 }
 
+// Diff returns a unified diff for all pending changed files.
 func (c *ChangeSet) Diff(ctx context.Context) (string, error) {
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -73,6 +80,7 @@ func (c *ChangeSet) Diff(ctx context.Context) (string, error) {
 	return b.String(), nil
 }
 
+// Files returns changed file snapshots from the pending overlay.
 func (c *ChangeSet) Files(ctx context.Context) ([]ChangedFile, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -94,6 +102,7 @@ func (c *ChangeSet) Files(ctx context.Context) ([]ChangedFile, error) {
 	return files, nil
 }
 
+// Commit makes the pending overlay visible to future Editor and Engine calls.
 func (c *ChangeSet) Commit(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -110,6 +119,7 @@ func (c *ChangeSet) Commit(ctx context.Context) error {
 	return nil
 }
 
+// Discard closes the change set without committing its pending overlay.
 func (c *ChangeSet) Discard() error {
 	c.closed = true
 	c.overlay = nil

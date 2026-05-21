@@ -2,6 +2,8 @@ package codegate
 
 import "github.com/codewandler/codegate/internal/core"
 
+// LookupQuery selects a symbol, position, path, or structural target for an
+// agent-facing lookup.
 type LookupQuery struct {
 	Path              string     `json:"path,omitempty"`
 	Offset            *int       `json:"offset,omitempty"`
@@ -21,6 +23,8 @@ type LookupQuery struct {
 	MaxResults        int        `json:"max_results,omitempty"`
 }
 
+// LookupResult contains the symbols, locations, references, calls, and
+// diagnostics resolved for a LookupQuery.
 type LookupResult struct {
 	Query          LookupQuery      `json:"query"`
 	Target         NavigationTarget `json:"target"`

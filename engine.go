@@ -19,6 +19,8 @@ type Engine interface {
 	Capabilities() []BackendSpec
 }
 
+// EngineBuilder collects workspace and language backend configuration before
+// constructing an Engine.
 type EngineBuilder struct {
 	roots     []string
 	source    Source
@@ -29,6 +31,8 @@ type EngineBuilder struct {
 	err       error
 }
 
+// New starts building an agent-facing codegate engine. Callers must provide a
+// workspace source and at least one explicit language backend before Build.
 func New() *EngineBuilder {
 	return &EngineBuilder{roots: []string{"."}}
 }
@@ -38,6 +42,8 @@ func NewEngine() *EngineBuilder {
 	return New()
 }
 
+// Roots sets the workspace roots for the engine. The current implementation
+// accepts exactly one root.
 func (b *EngineBuilder) Roots(roots ...string) *EngineBuilder {
 	if len(roots) == 0 {
 		b.err = errors.New("codegate: Roots requires at least one root")
@@ -47,6 +53,8 @@ func (b *EngineBuilder) Roots(roots ...string) *EngineBuilder {
 	return b
 }
 
+// WithSource sets an explicit source implementation for workspace reads and
+// file listing.
 func (b *EngineBuilder) WithSource(source Source) *EngineBuilder {
 	if source == nil {
 		b.err = errors.New("codegate: nil source")
@@ -56,6 +64,7 @@ func (b *EngineBuilder) WithSource(source Source) *EngineBuilder {
 	return b
 }
 
+// WithFS sets an fs.FS-backed workspace source.
 func (b *EngineBuilder) WithFS(fsys fs.FS) *EngineBuilder {
 	if fsys == nil {
 		b.err = errors.New("codegate: nil fs.FS")
@@ -65,6 +74,8 @@ func (b *EngineBuilder) WithFS(fsys fs.FS) *EngineBuilder {
 	return b
 }
 
+// WithLanguage registers a language backend. Engine operations run against the
+// registered backend selected by Scope.Language or query language.
 func (b *EngineBuilder) WithLanguage(backend Backend) *EngineBuilder {
 	if backend == nil {
 		b.err = errors.New("codegate: nil language backend")
@@ -83,6 +94,7 @@ func (b *EngineBuilder) WithLanguage(backend Backend) *EngineBuilder {
 	return b
 }
 
+// Build validates the builder configuration and returns an Engine.
 func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

@@ -57,6 +57,7 @@ type Source struct {
 
 type Option func(*Source)
 
+// NewSource adapts explicit read and list callbacks into a codegate Source.
 func NewSource(read ReadFileFunc, list ListFilesFunc, opts ...Option) (*Source, error) {
 	if read == nil {
 		return nil, errors.New("agentruntime adapter: nil read function")
@@ -77,6 +78,8 @@ func NewSource(read ReadFileFunc, list ListFilesFunc, opts ...Option) (*Source, 
 	return source, nil
 }
 
+// NewWalkSource adapts a read callback plus a workspace walk callback into a
+// codegate Source.
 func NewWalkSource(read ReadFileFunc, walk WalkFunc, opts ...Option) (*Source, error) {
 	if walk == nil {
 		return nil, errors.New("agentruntime adapter: nil walk function")
@@ -89,12 +92,14 @@ func NewWalkSource(read ReadFileFunc, walk WalkFunc, opts ...Option) (*Source, e
 	return source, nil
 }
 
+// WithMaxBytes sets the maximum bytes requested from the read callback.
 func WithMaxBytes(maxBytes int64) Option {
 	return func(source *Source) {
 		source.maxBytes = maxBytes
 	}
 }
 
+// WithWalkLimits sets depth and entry limits used by NewWalkSource.
 func WithWalkLimits(depth, maxEntries int) Option {
 	return func(source *Source) {
 		source.walkDepth = depth
@@ -102,12 +107,15 @@ func WithWalkLimits(depth, maxEntries int) Option {
 	}
 }
 
+// WithShowHidden controls whether NewWalkSource asks the walk callback to
+// include hidden files.
 func WithShowHidden(show bool) Option {
 	return func(source *Source) {
 		source.showHidden = show
 	}
 }
 
+// WithSkipDirs configures directory names skipped by NewWalkSource.
 func WithSkipDirs(skipDirs ...string) Option {
 	return func(source *Source) {
 		source.skipDirs = cleanList(skipDirs)

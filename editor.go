@@ -17,6 +17,7 @@ import (
 	"github.com/codewandler/codegate/internal/lang/markdown"
 )
 
+// Option configures the lower-level Editor API.
 type Option func(*Editor) error
 
 type Editor struct {
@@ -30,6 +31,8 @@ type Editor struct {
 	overlay map[string][]byte
 }
 
+// NewEditor creates the lower-level direct editing API. Most agent workflows
+// should prefer New and the Engine facade.
 func NewEditor(root string, opts ...Option) (*Editor, error) {
 	ed := &Editor{
 		root:      core.CleanPath(root),
@@ -69,6 +72,7 @@ func withLanguages(langs []LanguageID) Option {
 	}
 }
 
+// WithFS configures an Editor to read from an fs.FS workspace.
 func WithFS(fsys fs.FS) Option {
 	return func(ed *Editor) error {
 		if fsys == nil {
@@ -79,6 +83,7 @@ func WithFS(fsys fs.FS) Option {
 	}
 }
 
+// WithSource configures an Editor to read from a custom Source implementation.
 func WithSource(source Source) Option {
 	return func(ed *Editor) error {
 		if source == nil {
@@ -89,6 +94,8 @@ func WithSource(source Source) Option {
 	}
 }
 
+// WithLanguage selects the language backend used by lower-level Editor calls
+// when no per-call Scope language is provided.
 func WithLanguage(lang LanguageID) Option {
 	return func(ed *Editor) error {
 		if lang == "" {
@@ -99,6 +106,7 @@ func WithLanguage(lang LanguageID) Option {
 	}
 }
 
+// WithBackend registers a backend for the lower-level Editor API.
 func WithBackend(backend Backend) Option {
 	return func(ed *Editor) error {
 		if backend == nil {
