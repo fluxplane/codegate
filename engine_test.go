@@ -929,6 +929,50 @@ type Manager struct {
 	}
 }
 
+func TestEngineAssessDocCoverageTargetsPublicPackages(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "internal/impl/impl.go", `package impl
+
+func InternalExport() {}
+
+type InternalType struct {
+	Field string
+}
+`)
+	writeEngineFile(t, root, "cmd/app/main.go", `package main
+
+func CommandExport() {}
+`)
+	writeEngineFile(t, root, "api.go", `package demo
+
+// Public documents Public.
+func Public() {}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["doc_coverage_percent"] != 100 || report.Metrics["undocumented_export_count"] != 0 {
+		t.Fatalf("expected internal/cmd exports to be excluded from public doc coverage, got %#v", report.Metrics)
+	}
+	if hasFinding(report, "quality_undocumented_export") || hasFinding(report, "quality_low_doc_coverage") {
+		t.Fatalf("did not expect internal/cmd exported symbols to create public doc findings, got %#v", report.Findings)
+	}
+}
+
 func TestEngineAssessCountsWeakPackageNameOncePerPackage(t *testing.T) {
 	root := t.TempDir()
 	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
@@ -996,6 +1040,80 @@ type Service interface {
 	}
 	if report.Metrics["doc_coverage_percent"] != 100 || report.Metrics["undocumented_export_count"] != 0 {
 		t.Fatalf("unexpected doc metrics for trailing comments: %#v", report.Metrics)
+	}
+}
+
+func TestEngineAssessAdvisoryArchitectureDoesNotReduceBoundaryWithoutRules(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	var imports []string
+	var names []string
+	for i := 0; i < 21; i++ {
+		name := "pkg" + string(rune('a'+i))
+		imports = append(imports, "\t\"example.com/demo/"+name+"\"")
+		names = append(names, name+".Name")
+		writeEngineFile(t, root, name+"/"+name+".go", "package "+name+"\n\nconst Name = \""+name+"\"\n")
+	}
+	writeEngineFile(t, root, "hub/hub.go", "package hub\n\nimport (\n"+strings.Join(imports, "\n")+"\n)\n\nfunc Names() []string { return []string{"+strings.Join(names, ", ")+"} }\n")
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope:        Scope{Language: Go},
+		Gates:        []AssessmentGate{AssessmentGateArchitecture},
+		TopUnitLimit: 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFinding(report, "architecture_high_fan_out") {
+		t.Fatalf("expected advisory architecture fan-out finding, got %#v", report.Findings)
+	}
+	if report.Scores.Boundary != 100 || report.Scores.Coupling >= 100 {
+		t.Fatalf("expected advisory pressure to affect coupling but not boundary, got %#v", report.Scores)
+	}
+}
+
+func TestEngineAssessAdvisorySuggestionsHaveLimitedMaintainabilityImpact(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	var src strings.Builder
+	src.WriteString("package impl\n\n")
+	for i := 0; i < 40; i++ {
+		src.WriteString("func Advisory")
+		src.WriteString(string(rune('A' + i%26)))
+		src.WriteString(string(rune('A' + (i/26)%26)))
+		src.WriteString("(flag bool) {}\n")
+	}
+	writeEngineFile(t, root, "internal/impl/impl.go", src.String())
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope:           Scope{Language: Go},
+		Gates:           []AssessmentGate{AssessmentGateMaintainability},
+		SuggestionLimit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.Suggestions < 40 || report.Summary.ExecutableFixes != 0 {
+		t.Fatalf("expected many advisory-only suggestions, got %#v", report.Summary)
+	}
+	if report.Scores.Maintainability < 80 {
+		t.Fatalf("expected advisory-only suggestion volume to have limited score impact, got %#v", report.Scores)
 	}
 }
 

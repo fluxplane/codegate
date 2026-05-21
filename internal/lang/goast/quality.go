@@ -402,7 +402,7 @@ func (c *goQualityCollector) collectGenDeclarationQuality(gen *ast.GenDecl) {
 }
 
 func (c *goQualityCollector) collectExportDoc(name *ast.Ident, doc *ast.CommentGroup, loc Location, symbol string) {
-	if name == nil || !isExported(name.Name) || c.testFile {
+	if name == nil || !isExported(name.Name) || c.testFile || !isPublicAPIUnit(c.pf.unit) {
 		return
 	}
 	c.report.metrics.ExportedSymbolCount++
@@ -414,6 +414,11 @@ func (c *goQualityCollector) collectExportDoc(name *ast.Ident, doc *ast.CommentG
 	c.addFinding("quality_undocumented_export", "info", loc, symbol,
 		fmt.Sprintf("Exported identifier %s has no doc comment.", symbol),
 		map[string]float64{"count": 1})
+}
+
+func isPublicAPIUnit(unit string) bool {
+	dir := packageDir(unit)
+	return dir != "cmd" && !strings.HasPrefix(dir, "cmd/") && dir != "internal" && !strings.HasPrefix(dir, "internal/")
 }
 
 func (c *goQualityCollector) collectTypeQuality(gen *ast.GenDecl) {

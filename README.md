@@ -89,11 +89,15 @@ Reports include scores, findings, violations, diagnostics, top units, and sugges
 
 For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, package/API shape, doc coverage, weak names, testability ratios, generated-code ratio, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, string concatenation in loops, unsafe/weak-crypto usage, dynamic process execution, composed SQL queries, dynamic file paths, reflection, obvious slice preallocation opportunities, and large range copies. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `doc_coverage_percent`, `test_to_code_ratio`, `ignored_error_count`, `dynamic_exec_count`, and `missing_capacity_count`.
 
+Go doc coverage metrics target exported symbols in public API packages outside implementation and command package trees. Implementation packages still contribute structural quality, safety, performance, and pressure signals, but their exported helper names are not treated as public documentation debt.
+
 Maintainability assessment also counts source debt markers in comments and prose. `TODO`, `FIXME`, `HACK`, `XXX`, and `DEPRECATED` markers appear as `maintainability_debt_marker` findings, with aggregate `debt_marker_count` and `debt_marker_counts` metrics. These produce advisory review suggestions only; codegate does not remove or rewrite intent-bearing notes automatically.
 
 ## Architecture Rules
 
 Go assessment can take explicit architecture rules. At the simplest level, rules are prefix matched against the importing unit, package directory, or source path and the imported path. More specific rules win, so a narrow `allow` can override a broader `deny`.
+
+Without explicit architecture rules, architecture findings are advisory pressure signals: they can affect coupling but do not reduce the hard boundary score. Boundary, test-boundary, side-effect, and unknown-package failures become hard signals when callers provide architecture rules.
 
 For larger projects, consumers define their own layers, allowed dependency directions, side-effect policies, coupling thresholds, and reasoned exceptions. `codegate` does not bake in concepts such as domain, adapter, runtime, or plugin; those names belong to the consuming project.
 

@@ -52,7 +52,7 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 			executable++
 		}
 	}
-	scores := goAssessmentScores(validation.Passed, findings, violations, len(proposals), pressure, opts)
+	scores := goAssessmentScores(validation.Passed, findings, violations, proposals, pressure, opts)
 	return AssessmentReport{
 		Language: string(Go),
 		Summary: AssessmentSummary{
@@ -315,8 +315,8 @@ func architectureImportViolation(kind string, imp ImportEdge, rule ArchitectureI
 	}
 }
 
-func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions int, pressure float64, opts AssessmentOptions) ScoreSet {
-	boundary := 100 - minAssessmentInt(40, countFindings(findings, "architecture_")*10)
+func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions []Proposal, pressure float64, opts AssessmentOptions) ScoreSet {
+	boundary := 100
 	testBoundary := 100
 	if opts.Architecture != nil {
 		boundaryViolations := countViolations(violations, "architecture_denied_import") + countViolations(violations, "architecture_boundary_violation")
@@ -339,7 +339,7 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 	debtMarkers := countFindings(findings, "maintainability_debt_marker")
 	qualityFindings := countFindings(findings, "quality_") + countFindings(findings, "performance_")
 	safetyFindings := countFindings(findings, "safety_") + countFindings(findings, "security_")
-	maintainability := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100)) - minAssessmentInt(20, debtMarkers*2) - minAssessmentInt(25, qualityFindings*3)
+	maintainability := 100 - minAssessmentInt(25, actionableSuggestionPressure(suggestions)*5) - minAssessmentInt(20, int(pressure/100)) - minAssessmentInt(20, debtMarkers*2) - minAssessmentInt(25, qualityFindings*3)
 	if maintainability < 50 {
 		maintainability = 50
 	}
@@ -374,6 +374,16 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 		Maintainability: maintainability,
 		Pressure:        pressure,
 	}
+}
+
+func actionableSuggestionPressure(suggestions []Proposal) int {
+	n := 0
+	for _, suggestion := range suggestions {
+		if len(suggestion.Operations) > 0 || suggestion.Confidence == HighConfidence {
+			n++
+		}
+	}
+	return n
 }
 
 func summarizeGoAssessmentSuggestions(proposals []Proposal, limit int) []AssessmentSuggestion {
@@ -486,16 +496,6 @@ func countViolations(violations []Violation, kind string) int {
 	n := 0
 	for _, violation := range violations {
 		if violation.Kind == kind {
-			n++
-		}
-	}
-	return n
-}
-
-func countViolationsPrefix(violations []Violation, prefix string) int {
-	n := 0
-	for _, violation := range violations {
-		if strings.HasPrefix(violation.Kind, prefix) {
 			n++
 		}
 	}

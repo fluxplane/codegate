@@ -21,6 +21,11 @@ Use the default compact `assess` view in agent loops that need scores, compact
 metrics, finding counts, and small top lists without full evidence payloads. Use
 `--view full` only when complete evidence is needed.
 
+Go scoring separates hard architecture boundaries from advisory pressure:
+without explicit architecture rules, fan-out and internal-boundary observations
+are review signals rather than boundary failures. Go doc coverage also targets
+public API packages outside implementation and command package trees.
+
 External validation adapters are covered by unit tests with fake in-process
 runners. The release checklist intentionally does not run shell/build/test
 adapters because codegate core must not execute external commands implicitly.
