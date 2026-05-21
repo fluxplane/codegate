@@ -87,6 +87,10 @@ fmt.Println(report.Summary.Score)
 
 Reports include scores, findings, violations, diagnostics, top units, and suggestions. They are designed to be consumed by LLMs, CI bots, and review automation.
 
+For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, and string concatenation in loops. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `large_function_count`, and `ignored_error_count`.
+
+Maintainability assessment also counts source debt markers in comments and prose. `TODO`, `FIXME`, `HACK`, `XXX`, and `DEPRECATED` markers appear as `maintainability_debt_marker` findings, with aggregate `debt_marker_count` and `debt_marker_counts` metrics. These produce advisory review suggestions only; codegate does not remove or rewrite intent-bearing notes automatically.
+
 ## Architecture Rules
 
 Go assessment can take explicit architecture rules. At the simplest level, rules are prefix matched against the importing unit, package directory, or source path and the imported path. More specific rules win, so a narrow `allow` can override a broader `deny`.
@@ -232,6 +236,8 @@ engine, err := codegate.New().
 
 `Capabilities()` and `codegate capabilities` report both coarse backend capability levels and operation-level support. Agents can use this to choose safe calls without guessing which language supports which validation modes or edit operations.
 
+Capability output also lists exact assessment support per language: gates, metric IDs, finding kinds, and violation kinds. Metric concepts are generic public strings, but support is declared per backend. For example, Go currently reports metrics such as `max_cyclomatic_complexity` and `ignored_error_count`, while Markdown reports structural documentation signals and debt marker counts.
+
 Built-in backends:
 
 - Go via `language/golang`
@@ -239,13 +245,13 @@ Built-in backends:
   - editing: advanced for supported structured operations
   - refactoring: basic executable operations plus advisory suggestions
   - validation: parse and best-effort typecheck
-  - operation detail includes symbol/position lookup, architecture gates, typecheck validation, Go edit operations, and Go refactor kinds
+  - operation detail includes symbol/position lookup, architecture gates, typecheck validation, Go edit operations, debt-marker review, and Go refactor kinds
 - Markdown via `language/markdown`
   - lookup and static analysis: basic structural support
   - quality reporting: basic
   - editing and refactoring: basic deterministic structural fixes
   - validation: parse/structure checks
-  - operation detail includes document/heading/anchor lookup, maintainability/safety/coverage gates, parse validation, and Markdown structure edit operations
+  - operation detail includes document/heading/anchor lookup, maintainability/safety/coverage gates, parse validation, Markdown structure edit operations, and debt-marker review
 
 ## Safety Model
 
@@ -281,3 +287,4 @@ Before tagging, run the checklist in [`RELEASE.md`](RELEASE.md). The normal test
 5. Add validation adapters for explicit build/test workflows.
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
 7. Expand Markdown edit/refactor coverage for deterministic documentation fixes.
+8. Promote backend-local assessment signals into public `quality`, `security`, `performance`, and `testability` gates once Go plus at least one non-Go backend can produce comparable findings and metrics.

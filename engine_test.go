@@ -87,6 +87,53 @@ func TestEngineCapabilities(t *testing.T) {
 	if !hasOperation(specs[1].Operations.EditOperations, OpMarkdownEnsureH1) || hasOperation(specs[1].Operations.ValidationKinds, ValidationTypecheck) {
 		t.Fatalf("markdown backend did not declare expected operation detail: %#v", specs[1].Operations)
 	}
+	if !hasMetricSupport(specs[0], "max_cyclomatic_complexity") || !hasMetricSupport(specs[0], "ignored_error_count") || !hasFindingSupport(specs[0], "quality_high_complexity_function") {
+		t.Fatalf("go backend did not declare expected assessment support: %#v", specs[0].Operations.Assessment)
+	}
+	if !hasMetricSupport(specs[1], "debt_marker_count") || !hasFindingSupport(specs[1], "markdown_broken_local_heading_link") {
+		t.Fatalf("markdown backend did not declare expected assessment support: %#v", specs[1].Operations.Assessment)
+	}
+}
+
+func TestEngineCapabilityMetricsCoverAssessmentOutput(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", `package demo
+
+// TODO: replace placeholder.
+func Demo(v interface{}) {
+	_ = v.(string)
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs := eng.Capabilities()
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected one backend spec, got %#v", specs)
+	}
+	for key := range report.Metrics {
+		supported := key
+		if key == "provider_score_model" {
+			supported = "score_model"
+		}
+		if !hasMetricSupport(specs[0], supported) {
+			t.Fatalf("assessment metric %q was not declared in capabilities: %#v", key, specs[0].Operations.Assessment.Metrics)
+		}
+	}
 }
 
 func TestEngineMarkdownLookupAssessValidate(t *testing.T) {
@@ -247,6 +294,35 @@ See [Missing](#missing).
 	}
 }
 
+func TestEngineMarkdownDebtMarkersSkipFencedCode(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "README.md", "# Demo\n\nTODO: write the overview.\n\nIgnore `FIXME` inline code.\n\n```go\n// FIXME: sample only\n```\n")
+
+	ctx := context.Background()
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(internalmarkdown.New()).
+		Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(ctx, AssessmentOptions{
+		Scope:           Scope{Language: Markdown},
+		Gates:           []AssessmentGate{AssessmentGateMaintainability},
+		SuggestionLimit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := report.Metrics["debt_marker_count"]; count != 1 {
+		t.Fatalf("expected one prose debt marker, got %#v in %#v", count, report.Metrics)
+	}
+	if !hasFinding(report, "maintainability_debt_marker") || !hasSuggestion(report, RefactorReviewDebtMarkers) {
+		t.Fatalf("expected markdown debt marker finding and suggestion, got %#v %#v", report.Findings, report.Suggestions)
+	}
+}
+
 func TestEngineAssessReportsMaintainabilityFindings(t *testing.T) {
 	root := t.TempDir()
 	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
@@ -273,6 +349,256 @@ func TestEngineAssessReportsMaintainabilityFindings(t *testing.T) {
 	}
 	if report.Summary.Findings != len(report.Findings) || report.Metrics["provider_score_model"] != "go-architecture-v0" {
 		t.Fatalf("unexpected assessment summary/metrics: %#v", report)
+	}
+}
+
+func TestEngineAssessReportsGoDebtMarkers(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", `package demo
+
+// TODO: replace temporary implementation.
+func Target() string {
+	// fixme: remove this branch.
+	return "ok"
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope:           Scope{Language: Go},
+		Gates:           []AssessmentGate{AssessmentGateMaintainability},
+		SuggestionLimit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := report.Metrics["debt_marker_count"]; count != 2 {
+		t.Fatalf("expected two debt markers, got %#v in %#v", count, report.Metrics)
+	}
+	if !hasFinding(report, "maintainability_debt_marker") || !hasSuggestion(report, RefactorReviewDebtMarkers) {
+		t.Fatalf("expected debt marker finding and suggestion, got %#v %#v", report.Findings, report.Suggestions)
+	}
+}
+
+func TestEngineAssessReportsGoQualityMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	src := `package demo
+
+type LargeStruct struct {
+`
+	for i := 0; i < 21; i++ {
+		src += "	F" + string(rune('A'+i)) + " int\n"
+	}
+	src += `}
+
+type BroadInterface interface {
+`
+	for i := 0; i < 9; i++ {
+		src += "	M" + string(rune('A'+i)) + "()\n"
+	}
+	src += `}
+
+func Big() {
+`
+	for i := 0; i < 81; i++ {
+		src += "	_ = " + string(rune('0'+i%10)) + "\n"
+	}
+	src += `}
+
+func Complex(a, b, c, d, e, f int) int {
+	if a > 0 {
+		if b > 0 {
+			if c > 0 {
+				if d > 0 {
+					if e > 0 {
+						return 1
+					}
+				}
+			}
+		}
+	}
+	switch a {
+	case 1:
+		return 1
+	case 2:
+		return 2
+	case 3:
+		return 3
+	case 4:
+		return 4
+	case 5:
+		return 5
+	}
+	for i := 0; i < 3; i++ {
+		if i%2 == 0 && a > 0 || b > 0 {
+			return i
+		}
+	}
+	return 0
+}
+`
+	for i := 0; i < 430; i++ {
+		src += "const C" + string(rune('A'+i%26)) + string(rune('A'+(i/26)%26)) + " = 1\n"
+	}
+	writeEngineFile(t, root, "quality.go", src)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{
+		"quality_high_complexity_function",
+		"quality_deeply_nested_function",
+		"quality_many_parameters",
+		"quality_many_returns",
+		"quality_large_function",
+		"quality_large_file",
+		"quality_large_struct",
+		"quality_broad_interface",
+	} {
+		if !hasFinding(report, kind) {
+			t.Fatalf("expected %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["max_cyclomatic_complexity"] == 0 || report.Metrics["high_complexity_function_count"] == 0 || report.Scores.Maintainability >= 100 {
+		t.Fatalf("expected quality metrics to affect maintainability, got metrics=%#v scores=%#v", report.Metrics, report.Scores)
+	}
+}
+
+func TestEngineAssessReportsGoSafetyAndPerformanceSmells(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "smells.go", `package demo
+
+import "os"
+
+func Smells(v interface{}) {
+	_ = os.Chdir(".")
+	_ = v.(string)
+	for i := 0; i < 2; i++ {
+		defer os.Chdir(".")
+	}
+	panic("stop")
+	var s string
+	for i := 0; i < 2; i++ {
+		s += "x"
+	}
+	_ = s
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{
+		"safety_ignored_error",
+		"safety_unchecked_type_assertion",
+		"safety_defer_in_loop",
+		"safety_process_exit",
+		"performance_string_concat_in_loop",
+	} {
+		if !hasFinding(report, kind) {
+			t.Fatalf("expected %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["ignored_error_count"] != 1 || report.Metrics["unchecked_type_assertion_count"] != 1 || report.Metrics["defer_in_loop_count"] != 1 || report.Metrics["process_exit_count"] != 1 || report.Metrics["string_concat_in_loop_count"] != 1 {
+		t.Fatalf("unexpected safety/performance metrics: %#v", report.Metrics)
+	}
+	if report.Scores.SideEffect >= 100 {
+		t.Fatalf("expected safety findings to affect side-effect score, got %#v", report.Scores)
+	}
+}
+
+func TestEngineAssessSkipsGeneratedAndVendorQualityFindings(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	noisy := `package demo
+
+func Complex(a, b, c, d, e, f int) int {
+	if a > 0 {
+		if b > 0 {
+			if c > 0 {
+				if d > 0 {
+					if e > 0 {
+						return 1
+					}
+				}
+			}
+		}
+	}
+	switch a {
+	case 1:
+		return 1
+	case 2:
+		return 2
+	case 3:
+		return 3
+	case 4:
+		return 4
+	case 5:
+		return 5
+	}
+	return 0
+}
+`
+	writeEngineFile(t, root, "generated.go", "// Code generated by test. DO NOT EDIT.\n"+noisy)
+	writeEngineFile(t, root, "vendor/example.com/lib/noisy.go", noisy)
+	writeEngineFile(t, root, "demo.go", "package demo\n\nfunc Fine() {}\n")
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.Findings {
+		if strings.HasPrefix(finding.Kind, "quality_") || strings.HasPrefix(finding.Kind, "performance_") {
+			t.Fatalf("expected generated/vendor files to be skipped for quality findings, got %#v", report.Findings)
+		}
+	}
+	if report.Metrics["max_cyclomatic_complexity"] != 1 {
+		t.Fatalf("expected only normal file metrics, got %#v", report.Metrics)
 	}
 }
 
@@ -796,6 +1122,15 @@ func hasViolation(report AssessmentReport, kind string) bool {
 	return false
 }
 
+func hasSuggestion(report AssessmentReport, kind RefactorKind) bool {
+	for _, suggestion := range report.Suggestions {
+		if suggestion.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func hasCapability(spec BackendSpec, capability Capability, level CapabilityLevel) bool {
 	for _, support := range spec.Capabilities {
 		if support.Capability == capability && support.Level == level {
@@ -808,6 +1143,24 @@ func hasCapability(spec BackendSpec, capability Capability, level CapabilityLeve
 func hasOperation[T comparable](values []T, target T) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMetricSupport(spec BackendSpec, id string) bool {
+	for _, metric := range spec.Operations.Assessment.Metrics {
+		if metric.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFindingSupport(spec BackendSpec, id string) bool {
+	for _, finding := range spec.Operations.Assessment.Findings {
+		if finding.ID == id {
 			return true
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/codewandler/codegate/internal/core"
 )
 
 func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, opts AssessmentOptions) (AssessmentReport, error) {
@@ -77,11 +79,21 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 		TopUnits:    units,
 		Suggestions: summarizeGoAssessmentSuggestions(proposals, opts.SuggestionLimit),
 		Diagnostics: diagnostics,
-		Metrics: map[string]interface{}{
-			"score_model": "go-architecture-v0",
-			"gates":       normalizedAssessmentGates(opts.Gates),
-		},
+		Metrics:     goAssessmentMetrics(idx, opts),
 	}, nil
+}
+
+func goAssessmentMetrics(idx *index, opts AssessmentOptions) map[string]interface{} {
+	metrics := map[string]interface{}{
+		"score_model":        "go-architecture-v0",
+		"gates":              normalizedAssessmentGates(opts.Gates),
+		"debt_marker_count":  len(idx.debtMarkers),
+		"debt_marker_counts": core.CountDebtMarkers(idx.debtMarkers),
+	}
+	for key, value := range idx.quality.metrics.assessmentMetrics() {
+		metrics[key] = value
+	}
+	return metrics
 }
 
 func goAssessmentFindings(idx *index, units []UnitMetrics, validation ValidationResult, opts AssessmentOptions) []Finding {
@@ -133,7 +145,9 @@ func goAssessmentFindings(idx *index, units []UnitMetrics, validation Validation
 				Reason:   "High pressure is based on fan-in, call fan-in, public symbols, files, and implementation edges.",
 			})
 		}
+		out = append(out, goDebtMarkerFindings(idx)...)
 	}
+	out = append(out, goQualityFindings(idx, opts)...)
 	if assessmentGateEnabled(opts, AssessmentGateSafety) && !validation.Complete {
 		out = append(out, Finding{
 			Kind:     "safety_incomplete_validation",
@@ -142,6 +156,31 @@ func goAssessmentFindings(idx *index, units []UnitMetrics, validation Validation
 		})
 	}
 	sortFindings(out)
+	return out
+}
+
+func goQualityFindings(idx *index, opts AssessmentOptions) []Finding {
+	if len(idx.quality.findings) == 0 {
+		return nil
+	}
+	all := assessmentGateEnabled(opts, AssessmentGateAll)
+	maintainability := assessmentGateEnabled(opts, AssessmentGateMaintainability)
+	safety := assessmentGateEnabled(opts, AssessmentGateSafety)
+	out := make([]Finding, 0, len(idx.quality.findings))
+	for _, finding := range idx.quality.findings {
+		switch {
+		case all:
+			out = append(out, finding)
+		case strings.HasPrefix(finding.Kind, "quality_") || strings.HasPrefix(finding.Kind, "performance_"):
+			if maintainability {
+				out = append(out, finding)
+			}
+		case strings.HasPrefix(finding.Kind, "safety_"):
+			if safety {
+				out = append(out, finding)
+			}
+		}
+	}
 	return out
 }
 
@@ -158,6 +197,36 @@ func goAssessmentViolations(validation ValidationResult, opts AssessmentOptions)
 		}
 	}
 	return out
+}
+
+func goDebtMarkerFindings(idx *index) []Finding {
+	out := make([]Finding, 0, len(idx.debtMarkers))
+	for _, marker := range idx.debtMarkers {
+		out = append(out, Finding{
+			Kind:     "maintainability_debt_marker",
+			Severity: debtMarkerSeverity(marker.Marker),
+			Location: marker.Location,
+			Package:  idx.fileUnits[marker.Location.URI],
+			Symbol:   marker.Marker,
+			Evidence: []Evidence{{
+				Kind:     "debt_marker",
+				Message:  marker.Text,
+				Location: marker.Location,
+				Metrics:  map[string]float64{"count": 1},
+			}},
+			Reason: fmt.Sprintf("%s marker should be reviewed before publishing or automated cleanup.", marker.Marker),
+		})
+	}
+	return out
+}
+
+func debtMarkerSeverity(marker string) string {
+	switch marker {
+	case "FIXME", "HACK", "XXX", "DEPRECATED":
+		return "warning"
+	default:
+		return "info"
+	}
 }
 
 func goArchitectureViolations(idx *index, opts AssessmentOptions) []Violation {
@@ -262,12 +331,18 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 		sideEffect = 100 - minAssessmentInt(60, countArchitectureEffectViolations(violations, opts.Architecture)*10)
 		coverage = minAssessmentInt(coverage, 100-minAssessmentInt(100, countViolations(violations, "architecture_unknown_package")*20))
 	}
-	maintainability := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100))
+	debtMarkers := countFindings(findings, "maintainability_debt_marker")
+	qualityFindings := countFindings(findings, "quality_") + countFindings(findings, "performance_")
+	safetyFindings := countFindings(findings, "safety_")
+	maintainability := 100 - minAssessmentInt(40, suggestions/5) - minAssessmentInt(20, int(pressure/100)) - minAssessmentInt(20, debtMarkers*2) - minAssessmentInt(25, qualityFindings*3)
 	if maintainability < 50 {
 		maintainability = 50
 	}
 	if assessmentGateEnabled(opts, AssessmentGateSafety) && !validationPassed {
 		sideEffect = minAssessmentInt(sideEffect, 50)
+	}
+	if safetyFindings > 0 {
+		sideEffect = minAssessmentInt(sideEffect, 100-minAssessmentInt(40, safetyFindings*5))
 	}
 	overall := minAssessmentInt(boundary, maintainability)
 	overall = minAssessmentInt(overall, coverage)

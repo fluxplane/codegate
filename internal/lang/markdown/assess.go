@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/codewandler/codegate/internal/core"
 )
 
 func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, opts AssessmentOptions) (AssessmentReport, error) {
@@ -58,11 +60,17 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 		Violations:  violations,
 		Suggestions: summarizeMarkdownAssessmentSuggestions(proposals, opts.SuggestionLimit),
 		Diagnostics: diagnostics,
-		Metrics: map[string]interface{}{
-			"score_model": "markdown-structure-v0",
-			"gates":       normalizedMarkdownAssessmentGates(opts.Gates),
-		},
+		Metrics:     markdownAssessmentMetrics(idx, opts),
 	}, nil
+}
+
+func markdownAssessmentMetrics(idx *index, opts AssessmentOptions) map[string]interface{} {
+	return map[string]interface{}{
+		"score_model":        "markdown-structure-v0",
+		"gates":              normalizedMarkdownAssessmentGates(opts.Gates),
+		"debt_marker_count":  len(idx.debtMarkers),
+		"debt_marker_counts": core.CountDebtMarkers(idx.debtMarkers),
+	}
 }
 
 func summarizeMarkdownAssessmentSuggestions(proposals []Proposal, limit int) []AssessmentSuggestion {
@@ -99,9 +107,40 @@ func markdownFindings(idx *index, opts AssessmentOptions) []Finding {
 		for _, file := range idx.files {
 			out = append(out, markdownFileFindings(file)...)
 		}
+		out = append(out, markdownDebtMarkerFindings(idx)...)
 	}
 	sortFindings(out)
 	return out
+}
+
+func markdownDebtMarkerFindings(idx *index) []Finding {
+	out := make([]Finding, 0, len(idx.debtMarkers))
+	for _, marker := range idx.debtMarkers {
+		out = append(out, Finding{
+			Kind:     "maintainability_debt_marker",
+			Severity: markdownDebtMarkerSeverity(marker.Marker),
+			Location: marker.Location,
+			Package:  marker.Location.URI,
+			Symbol:   marker.Marker,
+			Evidence: []Evidence{{
+				Kind:     "debt_marker",
+				Message:  marker.Text,
+				Location: marker.Location,
+				Metrics:  map[string]float64{"count": 1},
+			}},
+			Reason: fmt.Sprintf("%s marker should be reviewed before publishing or automated cleanup.", marker.Marker),
+		})
+	}
+	return out
+}
+
+func markdownDebtMarkerSeverity(marker string) string {
+	switch marker {
+	case "FIXME", "HACK", "XXX", "DEPRECATED":
+		return "warning"
+	default:
+		return "info"
+	}
 }
 
 func markdownFileFindings(file markdownFile) []Finding {
@@ -212,7 +251,7 @@ func markdownScores(validationPassed bool, findings []Finding, violations []Viol
 	coupling := 100
 	sideEffect := 100
 	coverage := 100 - minAssessmentInt(50, countMarkdownFindings(findings, "coverage_")*25)
-	maintainability := 100 - minAssessmentInt(50, countMarkdownFindings(findings, "markdown_")*5)
+	maintainability := 100 - minAssessmentInt(50, countMarkdownFindings(findings, "markdown_")*5) - minAssessmentInt(20, countMarkdownFindings(findings, "maintainability_debt_marker")*2)
 	if maintainability < 50 {
 		maintainability = 50
 	}

@@ -10,6 +10,10 @@ type (
 	CapabilityLevel   = core.CapabilityLevel
 	CapabilitySupport = core.CapabilitySupport
 	OperationSupport  = core.OperationSupport
+	AssessmentSupport = core.AssessmentSupport
+	MetricSupport     = core.MetricSupport
+	FindingSupport    = core.FindingSupport
+	ViolationSupport  = core.ViolationSupport
 	Backend           = core.Backend
 	Source            = core.Snapshot
 	Document          = core.Document

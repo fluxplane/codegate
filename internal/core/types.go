@@ -22,7 +22,7 @@ type BackendSpec struct {
 	Language       LanguageID          `json:"language"`
 	Name           string              `json:"name"`
 	FileExtensions []string            `json:"file_extensions"`
-	Capabilities   []CapabilitySupport `json:"capabilities"`
+	Capabilities   []CapabilitySupport `json:"capabilities,omitempty"`
 	Operations     OperationSupport    `json:"operations,omitempty"`
 	ResolutionMode string              `json:"resolution_mode"`
 }
@@ -55,12 +55,41 @@ type CapabilitySupport struct {
 }
 
 type OperationSupport struct {
-	Lookup          []string         `json:"lookup,omitempty"`
-	AssessmentGates []AssessmentGate `json:"assessment_gates,omitempty"`
-	ValidationKinds []ValidationKind `json:"validation_kinds,omitempty"`
-	EditOperations  []OperationKind  `json:"edit_operations,omitempty"`
-	RefactorKinds   []RefactorKind   `json:"refactor_kinds,omitempty"`
-	Notes           []string         `json:"notes,omitempty"`
+	Lookup          []string          `json:"lookup,omitempty"`
+	AssessmentGates []AssessmentGate  `json:"assessment_gates,omitempty"`
+	Assessment      AssessmentSupport `json:"assessment,omitempty"`
+	ValidationKinds []ValidationKind  `json:"validation_kinds,omitempty"`
+	EditOperations  []OperationKind   `json:"edit_operations,omitempty"`
+	RefactorKinds   []RefactorKind    `json:"refactor_kinds,omitempty"`
+	Notes           []string          `json:"notes,omitempty"`
+}
+
+type AssessmentSupport struct {
+	Gates      []AssessmentGate   `json:"gates,omitempty"`
+	Metrics    []MetricSupport    `json:"metrics,omitempty"`
+	Findings   []FindingSupport   `json:"findings,omitempty"`
+	Violations []ViolationSupport `json:"violations,omitempty"`
+}
+
+type MetricSupport struct {
+	ID          string          `json:"id"`
+	Category    string          `json:"category,omitempty"`
+	Level       CapabilityLevel `json:"level,omitempty"`
+	Description string          `json:"description,omitempty"`
+}
+
+type FindingSupport struct {
+	ID          string          `json:"id"`
+	Category    string          `json:"category,omitempty"`
+	Level       CapabilityLevel `json:"level,omitempty"`
+	Description string          `json:"description,omitempty"`
+}
+
+type ViolationSupport struct {
+	ID          string          `json:"id"`
+	Category    string          `json:"category,omitempty"`
+	Level       CapabilityLevel `json:"level,omitempty"`
+	Description string          `json:"description,omitempty"`
 }
 
 type Snapshot interface {
@@ -987,6 +1016,7 @@ const (
 	RefactorSplitPackage         RefactorKind = "split_package"
 	RefactorReplaceFlagArgument  RefactorKind = "replace_flag_argument"
 	RefactorFixMarkdownStructure RefactorKind = "fix_markdown_structure"
+	RefactorReviewDebtMarkers    RefactorKind = "review_debt_markers"
 )
 
 type Confidence string

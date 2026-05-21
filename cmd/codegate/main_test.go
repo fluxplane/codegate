@@ -57,6 +57,78 @@ func Target() string {
 	}
 }
 
+func TestCodegateAssessDebtMarkers(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", `package demo
+
+// TODO: replace stub.
+func Target() string {
+	return "ok"
+}
+`)
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "maintainability", "--suggestions", "5"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"maintainability_debt_marker"`) || !strings.Contains(got, `"debt_marker_count": 1`) {
+		t.Fatalf("unexpected debt marker assess output:\n%s", got)
+	}
+}
+
+func TestCodegateAssessGoQualityMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", `package demo
+
+func Complex(a, b, c, d, e, f int) int {
+	if a > 0 {
+		if b > 0 {
+			if c > 0 {
+				if d > 0 {
+					if e > 0 {
+						return 1
+					}
+				}
+			}
+		}
+	}
+	switch a {
+	case 1:
+		return 1
+	case 2:
+		return 2
+	case 3:
+		return 3
+	case 4:
+		return 4
+	case 5:
+		return 5
+	}
+	return 0
+}
+`)
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "assess", "--gate", "maintainability"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"quality_high_complexity_function"`) || !strings.Contains(got, `"max_cyclomatic_complexity"`) {
+		t.Fatalf("unexpected quality assess output:\n%s", got)
+	}
+}
+
 func TestCodegateMarkdownCycleApplyFirst(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "README.md", `Intro text.
@@ -321,6 +393,31 @@ func TestCodegateCapabilitiesCommand(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"language": "markdown"`) || !strings.Contains(got, `"capability": "lookup"`) || !strings.Contains(got, `"markdown_h1_ensure"`) {
 		t.Fatalf("unexpected capabilities output:\n%s", got)
+	}
+	if !strings.Contains(got, `"assessment"`) || !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"markdown_broken_local_heading_link"`) {
+		t.Fatalf("expected exact assessment support in capabilities output:\n%s", got)
+	}
+}
+
+func TestCodegateCapabilitiesMetricsFilter(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", "package demo\n")
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "go", "capabilities", "--metrics"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"language": "go"`) || strings.Contains(got, `"language": "markdown"`) {
+		t.Fatalf("expected language-filtered capabilities output:\n%s", got)
+	}
+	if !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"ignored_error_count"`) || strings.Contains(got, `"findings"`) || strings.Contains(got, `"capabilities"`) {
+		t.Fatalf("unexpected metric-filtered capabilities output:\n%s", got)
 	}
 }
 

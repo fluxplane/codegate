@@ -112,6 +112,25 @@ func LineColumnOffset(b []byte, line, column int) int {
 	return len(b)
 }
 
+func PositionForOffset(b []byte, offset int) Position {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(b) {
+		offset = len(b)
+	}
+	line, column := 1, 1
+	for i := 0; i < offset; i++ {
+		if b[i] == '\n' {
+			line++
+			column = 1
+			continue
+		}
+		column++
+	}
+	return Position{Line: line, Column: column, Offset: offset}
+}
+
 func CleanPath(p string) string {
 	if p == "" {
 		return "."

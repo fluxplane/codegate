@@ -8,6 +8,8 @@ import (
 	"go/token"
 	"sort"
 	"strings"
+
+	"github.com/codewandler/codegate/internal/core"
 )
 
 func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) ([]Proposal, error) {
@@ -26,10 +28,38 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 	proposals = append(proposals, suggestBooleanFlags(idx)...)
 	proposals = append(proposals, suggestHighPressureSymbols(idx)...)
 	proposals = append(proposals, suggestHighFanIn(idx)...)
+	proposals = append(proposals, suggestDebtMarkers(idx)...)
 	for i := range proposals {
 		proposals[i].ID = fmt.Sprintf("prop_%03d", i+1)
 	}
 	return proposals, nil
+}
+
+func suggestDebtMarkers(idx *index) []Proposal {
+	if len(idx.debtMarkers) == 0 {
+		return nil
+	}
+	counts := core.CountDebtMarkers(idx.debtMarkers)
+	evidence := make([]Evidence, 0, minAssessmentInt(len(idx.debtMarkers), 10))
+	for i, marker := range idx.debtMarkers {
+		if i >= 10 {
+			break
+		}
+		evidence = append(evidence, Evidence{Kind: "debt_marker", Message: marker.Text, Location: marker.Location})
+	}
+	metrics := map[string]float64{"total": float64(len(idx.debtMarkers))}
+	for marker, count := range counts {
+		metrics[strings.ToLower(marker)] = float64(count)
+	}
+	return []Proposal{{
+		Kind:       RefactorReviewDebtMarkers,
+		Title:      "Review source debt markers",
+		Summary:    fmt.Sprintf("Found %d TODO/FIXME-style markers in Go comments.", len(idx.debtMarkers)),
+		Confidence: HighConfidence,
+		Risk:       RiskLow,
+		Evidence:   advisoryEvidence(evidence, "Debt markers carry human intent and are not changed automatically."),
+		Metrics:    metrics,
+	}}
 }
 
 func suggestUnusedPrivate(ctx context.Context, snapshot Snapshot, idx *index) ([]Proposal, error) {

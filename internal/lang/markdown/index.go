@@ -22,6 +22,7 @@ func New() MarkdownBackend {
 }
 
 func (b MarkdownBackend) Spec() BackendSpec {
+	assessment := markdownAssessmentSupport()
 	return BackendSpec{
 		Language:       Markdown,
 		Name:           "goldmark",
@@ -37,10 +38,11 @@ func (b MarkdownBackend) Spec() BackendSpec {
 		},
 		Operations: OperationSupport{
 			Lookup:          []string{"document", "heading", "anchor", "position"},
-			AssessmentGates: []AssessmentGate{AssessmentGateMaintainability, AssessmentGateSafety, AssessmentGateCoverage},
+			AssessmentGates: assessment.Gates,
+			Assessment:      assessment,
 			ValidationKinds: []ValidationKind{ValidationParse},
 			EditOperations:  []OperationKind{OpMarkdownEnsureH1, OpMarkdownSetHeadingLevel, OpMarkdownInsertSectionBody, OpMarkdownRenameHeading},
-			RefactorKinds:   []RefactorKind{RefactorFixMarkdownStructure},
+			RefactorKinds:   []RefactorKind{RefactorFixMarkdownStructure, RefactorReviewDebtMarkers},
 			Notes:           []string{"Markdown fixes are structural and conservative; broken-link repair stays advisory unless unambiguous."},
 		},
 		ResolutionMode: "structural",
@@ -73,6 +75,7 @@ type index struct {
 	symbols     []Symbol
 	occurrences []Occurrence
 	diagnostics []Diagnostic
+	debtMarkers []core.DebtMarker
 	byID        map[SymbolID]Symbol
 	byName      map[string][]Symbol
 	unitFiles   map[string][]string
@@ -133,6 +136,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 		}
 		mf := parseMarkdownFile(p, src)
 		idx.files = append(idx.files, mf)
+		idx.debtMarkers = append(idx.debtMarkers, core.FindMarkdownDebtMarkers(p, src)...)
 		idx.documents = append(idx.documents, Document{URI: p, Language: Markdown, UnitID: p})
 		idx.packages = append(idx.packages, PackageInfo{ID: p, Name: filepath.Base(p), Dir: path.Dir(p), Files: []string{p}})
 		idx.unitFiles[p] = []string{p}

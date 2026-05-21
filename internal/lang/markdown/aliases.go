@@ -6,6 +6,10 @@ type (
 	BackendSpec               = core.BackendSpec
 	CapabilitySupport         = core.CapabilitySupport
 	OperationSupport          = core.OperationSupport
+	AssessmentSupport         = core.AssessmentSupport
+	MetricSupport             = core.MetricSupport
+	FindingSupport            = core.FindingSupport
+	ViolationSupport          = core.ViolationSupport
 	Snapshot                  = core.Snapshot
 	Index                     = core.Index
 	Document                  = core.Document
@@ -86,6 +90,7 @@ const (
 )
 
 const RefactorFixMarkdownStructure = core.RefactorFixMarkdownStructure
+const RefactorReviewDebtMarkers = core.RefactorReviewDebtMarkers
 
 const (
 	OpMarkdownEnsureH1          = core.OpMarkdownEnsureH1

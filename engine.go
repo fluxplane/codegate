@@ -369,6 +369,12 @@ func (e *engine) aggregateAssessmentReports(scope Scope, reports []AssessmentRep
 		if gates, ok := report.Metrics["gates"]; ok {
 			out.Metrics["gates"] = gates
 		}
+		for key, value := range report.Metrics {
+			if key == "score_model" || key == "gates" {
+				continue
+			}
+			out.Metrics[key] = value
+		}
 	}
 	sortAssessmentOutput(&out)
 	finalizeAssessmentSummary(&out)

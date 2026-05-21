@@ -151,10 +151,38 @@ func markdownSuggestions(ctx context.Context, snapshot Snapshot, scope Scope) ([
 		}
 		proposals = append(proposals, markdownFileSuggestions(file)...)
 	}
+	proposals = append(proposals, markdownDebtMarkerSuggestions(idx)...)
 	for i := range proposals {
 		proposals[i].ID = fmt.Sprintf("prop_%03d", i+1)
 	}
 	return proposals, nil
+}
+
+func markdownDebtMarkerSuggestions(idx *index) []Proposal {
+	if len(idx.debtMarkers) == 0 {
+		return nil
+	}
+	counts := core.CountDebtMarkers(idx.debtMarkers)
+	evidence := make([]Evidence, 0, minAssessmentInt(len(idx.debtMarkers), 10))
+	for i, marker := range idx.debtMarkers {
+		if i >= 10 {
+			break
+		}
+		evidence = append(evidence, Evidence{Kind: "debt_marker", Message: marker.Text, Location: marker.Location})
+	}
+	metrics := map[string]float64{"total": float64(len(idx.debtMarkers))}
+	for marker, count := range counts {
+		metrics[strings.ToLower(marker)] = float64(count)
+	}
+	return []Proposal{{
+		Kind:       RefactorReviewDebtMarkers,
+		Title:      "Review documentation debt markers",
+		Summary:    fmt.Sprintf("Found %d TODO/FIXME-style markers in Markdown prose.", len(idx.debtMarkers)),
+		Confidence: core.HighConfidence,
+		Risk:       core.RiskLow,
+		Evidence:   advisoryMarkdownEvidence(evidence, "Debt markers carry human intent and are not changed automatically."),
+		Metrics:    metrics,
+	}}
 }
 
 func markdownFileSuggestions(file markdownFile) []Proposal {
@@ -327,4 +355,10 @@ func markdownTitleFromPath(p string) string {
 		parts[i] = strings.ToUpper(part[:1]) + part[1:]
 	}
 	return strings.Join(parts, " ")
+}
+
+func advisoryMarkdownEvidence(existing []Evidence, message string) []Evidence {
+	out := append([]Evidence(nil), existing...)
+	out = append(out, Evidence{Kind: "advisory_no_operation", Message: message})
+	return out
 }

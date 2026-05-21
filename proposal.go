@@ -19,6 +19,7 @@ const (
 	RefactorSplitPackage         = core.RefactorSplitPackage
 	RefactorReplaceFlagArgument  = core.RefactorReplaceFlagArgument
 	RefactorFixMarkdownStructure = core.RefactorFixMarkdownStructure
+	RefactorReviewDebtMarkers    = core.RefactorReviewDebtMarkers
 )
 
 const (

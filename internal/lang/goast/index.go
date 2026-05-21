@@ -21,6 +21,7 @@ func New() GoBackend {
 }
 
 func (b GoBackend) Spec() BackendSpec {
+	assessment := goAssessmentSupport()
 	return BackendSpec{
 		Language:       Go,
 		Name:           "goast",
@@ -28,7 +29,7 @@ func (b GoBackend) Spec() BackendSpec {
 		Capabilities: []CapabilitySupport{
 			{Capability: CapabilityLookup, Level: CapabilityAdvanced, Notes: "AST-backed symbol, position, reference, and call lookup for Go source."},
 			{Capability: CapabilityStaticAnalysis, Level: CapabilityAdvanced, Notes: "Indexes packages, symbols, imports, references, calls, and implementation edges."},
-			{Capability: CapabilityQuality, Level: CapabilityBasic, Notes: "Computes pressure metrics and advisory refactoring proposals."},
+			{Capability: CapabilityQuality, Level: CapabilityBasic, Notes: "Computes pressure, debt, complexity, shape, safety, and performance smell metrics."},
 			{Capability: CapabilityEditing, Level: CapabilityAdvanced, Notes: "Compiles structured Go edit operations into formatted source changes."},
 			{Capability: CapabilityRefactoring, Level: CapabilityBasic, Notes: "Supports executable low-risk operations plus advisory higher-level proposals."},
 			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Runs parse checks and best-effort type checking for local module code."},
@@ -36,7 +37,8 @@ func (b GoBackend) Spec() BackendSpec {
 		},
 		Operations: OperationSupport{
 			Lookup:          []string{"symbol", "qualified_name", "position", "references", "callers", "callees"},
-			AssessmentGates: []AssessmentGate{AssessmentGateArchitecture, AssessmentGateMaintainability, AssessmentGateSafety, AssessmentGateCoverage},
+			AssessmentGates: assessment.Gates,
+			Assessment:      assessment,
 			ValidationKinds: []ValidationKind{ValidationParse, ValidationTypecheck},
 			EditOperations: []OperationKind{
 				OpReplaceFunction, OpAppendFunction, OpDeleteFunction, OpReplaceMethod, OpDeleteMethod,
@@ -46,7 +48,7 @@ func (b GoBackend) Spec() BackendSpec {
 				OpRemoveGoField, OpRenameGoField, OpChangeGoParam, OpChangeGoResult, OpRenameGoRecv,
 				OpAddGoIfaceMeth, OpRemoveGoIface, OpExtractGoFunc, OpExtractGoMethod,
 			},
-			RefactorKinds: []RefactorKind{RefactorDeleteSymbol, RefactorExtractFunction, RefactorIntroduceConfig, RefactorSplitFunction, RefactorSplitPackage, RefactorReplaceFlagArgument},
+			RefactorKinds: []RefactorKind{RefactorDeleteSymbol, RefactorExtractFunction, RefactorIntroduceConfig, RefactorSplitFunction, RefactorSplitPackage, RefactorReplaceFlagArgument, RefactorReviewDebtMarkers},
 			Notes:         []string{"Go edits are AST-backed and formatted in memory; typecheck validation is best-effort."},
 		},
 		ResolutionMode: "ast",
@@ -69,6 +71,8 @@ type index struct {
 	edges       []Edge
 	imports     []ImportEdge
 	diagnostics []Diagnostic
+	debtMarkers []core.DebtMarker
+	quality     goQualityReport
 	byID        map[SymbolID]Symbol
 	byName      map[string][]Symbol
 	unitFiles   map[string][]string
@@ -138,6 +142,8 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 		idx.unitFiles[pf.unit] = append(idx.unitFiles[pf.unit], pf.path)
 		idx.fileUnits[pf.path] = pf.unit
 		idx.fileLOC[pf.path] = countLines(pf.src)
+		idx.debtMarkers = append(idx.debtMarkers, goDebtMarkers(pf.path, pf.src, pf.fset, pf.file)...)
+		idx.quality.merge(collectGoQuality(pf))
 	}
 	for _, pf := range parsed {
 		indexDecls(idx, pf)
@@ -151,6 +157,18 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 	core.SortSymbols(idx.symbols)
 	core.SortOccurrences(idx.occurrences)
 	return idx, nil
+}
+
+func goDebtMarkers(p string, src []byte, fset *token.FileSet, file *ast.File) []core.DebtMarker {
+	var out []core.DebtMarker
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			start := fset.Position(comment.Pos()).Offset
+			end := fset.Position(comment.End()).Offset
+			out = append(out, core.FindDebtMarkersInRange(p, src, start, end)...)
+		}
+	}
+	return out
 }
 
 func exportIndex(idx *index) *Index {

@@ -8,6 +8,10 @@ type (
 	CapabilityLevel            = core.CapabilityLevel
 	CapabilitySupport          = core.CapabilitySupport
 	OperationSupport           = core.OperationSupport
+	AssessmentSupport          = core.AssessmentSupport
+	MetricSupport              = core.MetricSupport
+	FindingSupport             = core.FindingSupport
+	ViolationSupport           = core.ViolationSupport
 	Snapshot                   = core.Snapshot
 	Index                      = core.Index
 	Document                   = core.Document
@@ -165,11 +169,13 @@ const (
 	RefactorSplitFunction       = core.RefactorSplitFunction
 	RefactorSplitPackage        = core.RefactorSplitPackage
 	RefactorReplaceFlagArgument = core.RefactorReplaceFlagArgument
+	RefactorReviewDebtMarkers   = core.RefactorReviewDebtMarkers
 )
 
 const (
 	LowConfidence    = core.LowConfidence
 	MediumConfidence = core.MediumConfidence
+	HighConfidence   = core.HighConfidence
 	RiskLow          = core.RiskLow
 	RiskMedium       = core.RiskMedium
 	RiskHigh         = core.RiskHigh

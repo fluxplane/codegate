@@ -91,6 +91,7 @@ as an agent skill and API proof at the same time.`),
 }
 
 func (a *app) capabilitiesCommand() *cobra.Command {
+	var metricsOnly bool
 	cmd := &cobra.Command{
 		Use:   "capabilities",
 		Short: "List language backend capabilities",
@@ -99,9 +100,12 @@ func (a *app) capabilitiesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.print(eng.Capabilities())
+			specs := eng.Capabilities()
+			specs = filterCapabilitySpecs(specs, codegate.LanguageID(a.cfg.language), cmd.Flag("language").Changed, metricsOnly)
+			return a.print(specs)
 		},
 	}
+	cmd.Flags().BoolVar(&metricsOnly, "metrics", false, "show only assessment metric support")
 	return cmd
 }
 
@@ -342,6 +346,25 @@ func (a *app) assess(ctx context.Context, limit int, gates []codegate.Assessment
 		return codegate.AssessmentReport{}, err
 	}
 	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates, Architecture: rules})
+}
+
+func filterCapabilitySpecs(specs []codegate.BackendSpec, language codegate.LanguageID, filterLanguage bool, metricsOnly bool) []codegate.BackendSpec {
+	out := make([]codegate.BackendSpec, 0, len(specs))
+	for _, spec := range specs {
+		if filterLanguage && spec.Language != language {
+			continue
+		}
+		if metricsOnly {
+			spec.Capabilities = nil
+			spec.Operations = codegate.OperationSupport{
+				Assessment: codegate.AssessmentSupport{
+					Metrics: spec.Operations.Assessment.Metrics,
+				},
+			}
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 func validationKinds(lang codegate.LanguageID) []codegate.ValidationKind {
