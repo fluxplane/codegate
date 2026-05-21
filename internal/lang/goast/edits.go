@@ -25,68 +25,79 @@ type editCompiler struct {
 
 func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operation) ([]FileEdit, error) {
 	compiler := editCompiler{snapshot: snapshot}
+	var (
+		edits []FileEdit
+		err   error
+	)
 	switch x := op.(type) {
 	case RenameSymbol:
-		return compiler.compileRenameSymbol(ctx, x)
+		edits, err = compiler.compileRenameSymbol(ctx, x)
 	case ReplaceSymbol:
-		return compiler.compileReplaceSymbol(ctx, x)
+		edits, err = compiler.compileReplaceSymbol(ctx, x)
 	case ReplaceFunction:
-		return compiler.compileReplaceFunction(ctx, x)
+		edits, err = compiler.compileReplaceFunction(ctx, x)
 	case AppendSymbol:
-		return compiler.compileAppendSymbol(ctx, x)
+		edits, err = compiler.compileAppendSymbol(ctx, x)
 	case AppendFunction:
-		return compiler.compileAppendFunction(ctx, x)
+		edits, err = compiler.compileAppendFunction(ctx, x)
 	case DeleteSymbol:
-		return compiler.compileDeleteSymbol(ctx, x)
+		edits, err = compiler.compileDeleteSymbol(ctx, x)
 	case DeleteFunction:
-		return compiler.compileDeleteFunction(ctx, x)
+		edits, err = compiler.compileDeleteFunction(ctx, x)
 	case ReplaceMethod:
-		return compiler.compileReplaceMethod(ctx, x)
+		edits, err = compiler.compileReplaceMethod(ctx, x)
 	case DeleteMethod:
-		return compiler.compileDeleteMethod(ctx, x)
+		edits, err = compiler.compileDeleteMethod(ctx, x)
 	case ReplaceComment:
-		return compiler.compileReplaceComment(ctx, x)
+		edits, err = compiler.compileReplaceComment(ctx, x)
 	case EnsureGoStructTag:
-		return compiler.compileEnsureStructTag(ctx, x)
+		edits, err = compiler.compileEnsureStructTag(ctx, x)
 	case RemoveGoStructTag:
-		return compiler.compileRemoveStructTag(ctx, x)
+		edits, err = compiler.compileRemoveStructTag(ctx, x)
 	case EnsureGoImport:
-		return compiler.compileEnsureGoImport(ctx, x)
+		edits, err = compiler.compileEnsureGoImport(ctx, x)
 	case RemoveGoImport:
-		return compiler.compileRemoveGoImport(ctx, x)
+		edits, err = compiler.compileRemoveGoImport(ctx, x)
 	case RenameGoImport:
-		return compiler.compileRenameGoImport(ctx, x)
+		edits, err = compiler.compileRenameGoImport(ctx, x)
 	case MoveSymbol:
-		return compiler.compileMoveSymbol(ctx, x)
+		edits, err = compiler.compileMoveSymbol(ctx, x)
 	case AddGoParameter:
-		return compiler.compileAddGoParameter(ctx, x)
+		edits, err = compiler.compileAddGoParameter(ctx, x)
 	case RemoveGoParameter:
-		return compiler.compileRemoveGoParameter(ctx, x)
+		edits, err = compiler.compileRemoveGoParameter(ctx, x)
 	case RenameGoParameter:
-		return compiler.compileRenameGoParameter(ctx, x)
+		edits, err = compiler.compileRenameGoParameter(ctx, x)
 	case AddGoStructField:
-		return compiler.compileAddGoStructField(ctx, x)
+		edits, err = compiler.compileAddGoStructField(ctx, x)
 	case RemoveGoStructField:
-		return compiler.compileRemoveGoStructField(ctx, x)
+		edits, err = compiler.compileRemoveGoStructField(ctx, x)
 	case RenameGoStructField:
-		return compiler.compileRenameGoStructField(ctx, x)
+		edits, err = compiler.compileRenameGoStructField(ctx, x)
 	case ChangeGoParameterType:
-		return compiler.compileChangeGoParameterType(ctx, x)
+		edits, err = compiler.compileChangeGoParameterType(ctx, x)
 	case ChangeGoResultType:
-		return compiler.compileChangeGoResultType(ctx, x)
+		edits, err = compiler.compileChangeGoResultType(ctx, x)
 	case RenameGoReceiver:
-		return compiler.compileRenameGoReceiver(ctx, x)
+		edits, err = compiler.compileRenameGoReceiver(ctx, x)
 	case AddGoInterfaceMethod:
-		return compiler.compileAddGoInterfaceMethod(ctx, x)
+		edits, err = compiler.compileAddGoInterfaceMethod(ctx, x)
 	case RemoveGoInterfaceMethod:
-		return compiler.compileRemoveGoInterfaceMethod(ctx, x)
+		edits, err = compiler.compileRemoveGoInterfaceMethod(ctx, x)
 	case ExtractGoFunction:
-		return compiler.compileExtractGoFunction(ctx, x)
+		edits, err = compiler.compileExtractGoFunction(ctx, x)
 	case ExtractGoMethod:
-		return compiler.compileExtractGoMethod(ctx, x)
+		edits, err = compiler.compileExtractGoMethod(ctx, x)
 	default:
 		return nil, fmt.Errorf("editor: go backend does not support operation %q", op.Kind())
 	}
+	if err != nil {
+		return nil, err
+	}
+	if err := compiler.rejectGeneratedFileEdits(ctx, edits); err != nil {
+		return nil, err
+	}
+	return edits, nil
 }
 
 func (b GoBackend) Format(ctx context.Context, path string, src []byte) ([]byte, error) {
@@ -101,6 +112,48 @@ func (b GoBackend) Format(ctx context.Context, path string, src []byte) ([]byte,
 		return nil, err
 	}
 	return formatted, nil
+}
+
+func (c editCompiler) rejectGeneratedFileEdits(ctx context.Context, edits []FileEdit) error {
+	seen := map[string]bool{}
+	for _, fe := range edits {
+		p := core.CleanPath(fe.Path)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if !strings.HasSuffix(p, ".go") {
+			continue
+		}
+		src, err := c.snapshot.ReadFile(ctx, p)
+		if err != nil {
+			return err
+		}
+		if isGeneratedGoSource(src) {
+			return fmt.Errorf("editor: refusing to refactor generated Go file %s", p)
+		}
+	}
+	return nil
+}
+
+func isGeneratedGoSource(src []byte) bool {
+	const marker = "DO NOT EDIT"
+	limit := len(src)
+	if limit > 4096 {
+		limit = 4096
+	}
+	head := string(src[:limit])
+	if !strings.Contains(head, marker) {
+		return false
+	}
+	lines := strings.Split(head, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "//"))
+		if strings.HasPrefix(line, "Code generated ") && strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c editCompiler) compileReplaceFunction(ctx context.Context, op ReplaceFunction) ([]FileEdit, error) {
@@ -614,6 +667,12 @@ func (c editCompiler) compileAddGoParameter(ctx context.Context, op AddGoParamet
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
 	}
+	if err := validateAddParameterName(fn, op.Name); err != nil {
+		return nil, err
+	}
+	if err := c.ensureFunctionSignatureSafe(ctx, idx, sym, fn, false); err != nil {
+		return nil, err
+	}
 	paramText := op.Name + " " + strings.TrimSpace(op.Type)
 	edits := []FileEdit{{Path: pf.path, Edits: []TextEdit{insertListItemEdit(pf.fset, fn.Type.Params.Opening, fn.Type.Params.Closing, paramRanges(pf.fset, fn.Type.Params), op.Position, paramText)}}}
 	callEdits, err := c.callArgumentEdits(ctx, idx, sym, op.Position, op.DefaultValue, true)
@@ -632,6 +691,9 @@ func (c editCompiler) compileRemoveGoParameter(ctx context.Context, op RemoveGoP
 		return nil, err
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	if err := c.ensureFunctionSignatureSafe(ctx, idx, sym, fn, false); err != nil {
 		return nil, err
 	}
 	params := namedParamRanges(pf.fset, fn.Type.Params)
@@ -673,6 +735,9 @@ func (c editCompiler) compileRenameGoParameter(ctx context.Context, op RenameGoP
 		return nil, err
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	if err := validateRenameParameterName(fn, op.OldName, op.NewName); err != nil {
 		return nil, err
 	}
 	var edits []TextEdit
@@ -747,6 +812,9 @@ func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveG
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
 	}
+	if fieldNameAmbiguous(idx, sym, op.Field) && hasSelectorUse(ctx, c.snapshot, idx, sym.UnitID, op.Field) {
+		return nil, fmt.Errorf("editor: field %q selector ownership is ambiguous", op.Field)
+	}
 	var fieldSym Symbol
 	for _, child := range sym.Children {
 		if child.Name == op.Field {
@@ -793,6 +861,9 @@ func (c editCompiler) compileRenameGoStructField(ctx context.Context, op RenameG
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
 	}
+	if op.UpdateSelectors && fieldNameAmbiguous(idx, sym, op.OldName) {
+		return nil, fmt.Errorf("editor: field %q selector ownership is ambiguous", op.OldName)
+	}
 	if structHasField(st, op.NewName) {
 		return nil, fmt.Errorf("editor: field %q already exists", op.NewName)
 	}
@@ -812,11 +883,14 @@ func (c editCompiler) compileChangeGoParameterType(ctx context.Context, op Chang
 	if op.Name == "" || strings.TrimSpace(op.Type) == "" {
 		return nil, errors.New("editor: ChangeGoParameterType requires Name and Type")
 	}
-	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
 		return nil, err
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	if err := c.ensureFunctionSignatureSafe(ctx, idx, sym, fn, true); err != nil {
 		return nil, err
 	}
 	r, err := namedFieldTypeRange(pf.fset, fn.Type.Params, op.Name, "parameter")
@@ -830,11 +904,14 @@ func (c editCompiler) compileChangeGoResultType(ctx context.Context, op ChangeGo
 	if strings.TrimSpace(op.Type) == "" {
 		return nil, errors.New("editor: ChangeGoResultType requires Type")
 	}
-	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
 		return nil, err
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	if err := c.ensureFunctionSignatureSafe(ctx, idx, sym, fn, true); err != nil {
 		return nil, err
 	}
 	var r Range
@@ -1484,6 +1561,221 @@ func isCompositeTypeName(expr ast.Expr, name string) bool {
 		return isCompositeTypeName(x.X, name)
 	default:
 		return false
+	}
+}
+
+func fieldNameAmbiguous(idx *index, owner Symbol, fieldName string) bool {
+	count := 0
+	for _, sym := range idx.symbols {
+		if sym.UnitID == owner.UnitID && sym.Kind == SymbolField && sym.Name == fieldName {
+			count++
+			if count > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasSelectorUse(ctx context.Context, snapshot Snapshot, idx *index, unitID, name string) bool {
+	for _, file := range idx.unitFiles[unitID] {
+		src, err := snapshot.ReadFile(ctx, file)
+		if err != nil {
+			continue
+		}
+		pf, err := parseOne(file, src)
+		if err != nil {
+			continue
+		}
+		found := false
+		ast.Inspect(pf.file, func(n ast.Node) bool {
+			if found {
+				return false
+			}
+			x, ok := n.(*ast.SelectorExpr)
+			if ok && x.Sel.Name == name {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAddParameterName(fn *ast.FuncDecl, name string) error {
+	for _, existing := range functionParameterNames(fn) {
+		if existing == name {
+			return fmt.Errorf("editor: parameter %q already exists", name)
+		}
+	}
+	if functionBodyDeclares(fn, name) {
+		return fmt.Errorf("editor: parameter %q would shadow a local declaration", name)
+	}
+	return nil
+}
+
+func validateRenameParameterName(fn *ast.FuncDecl, oldName, newName string) error {
+	for _, existing := range functionParameterNames(fn) {
+		if existing == newName && existing != oldName {
+			return fmt.Errorf("editor: parameter %q already exists", newName)
+		}
+	}
+	if functionBodyDeclares(fn, oldName) {
+		return fmt.Errorf("editor: parameter %q is shadowed in the function body", oldName)
+	}
+	if functionBodyDeclares(fn, newName) {
+		return fmt.Errorf("editor: parameter %q would shadow a local declaration", newName)
+	}
+	return nil
+}
+
+func functionParameterNames(fn *ast.FuncDecl) []string {
+	if fn.Type == nil || fn.Type.Params == nil {
+		return nil
+	}
+	var out []string
+	for _, field := range fn.Type.Params.List {
+		for _, name := range field.Names {
+			out = append(out, name.Name)
+		}
+	}
+	return out
+}
+
+func functionBodyDeclares(fn *ast.FuncDecl, name string) bool {
+	if fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE {
+				for _, expr := range x.Lhs {
+					if id, ok := expr.(*ast.Ident); ok && id.Name == name {
+						found = true
+						return false
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if x.Tok == token.DEFINE {
+				if id, ok := x.Key.(*ast.Ident); ok && id.Name == name {
+					found = true
+					return false
+				}
+				if id, ok := x.Value.(*ast.Ident); ok && id.Name == name {
+					found = true
+					return false
+				}
+			}
+		case *ast.ValueSpec:
+			for _, id := range x.Names {
+				if id.Name == name {
+					found = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func (c editCompiler) ensureFunctionSignatureSafe(ctx context.Context, idx *index, target Symbol, fn *ast.FuncDecl, allowVariadic bool) error {
+	if !allowVariadic && functionIsVariadic(fn) {
+		return fmt.Errorf("editor: cannot update call sites for variadic function %q", target.Name)
+	}
+	for _, occ := range idx.occurrences {
+		if occ.SymbolID != target.ID {
+			continue
+		}
+		switch occ.Kind {
+		case OccurrenceRead, OccurrenceWrite, OccurrenceReference:
+			return fmt.Errorf("editor: cannot change signature for %q because it is used as a function value", target.Name)
+		}
+	}
+	if target.Kind == SymbolMethod && methodNameAmbiguous(idx, target) {
+		return fmt.Errorf("editor: method %q selector resolution is ambiguous", target.Name)
+	}
+	for _, file := range idx.unitFiles[target.UnitID] {
+		src, err := c.snapshot.ReadFile(ctx, file)
+		if err != nil {
+			return err
+		}
+		pf, err := parseOne(file, src)
+		if err != nil {
+			return err
+		}
+		var guardErr error
+		ast.Inspect(pf.file, func(n ast.Node) bool {
+			if guardErr != nil {
+				return false
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok || callExprName(call.Fun) != target.Name {
+				return true
+			}
+			callee := callTarget(idx, target.UnitID, call.Fun)
+			if callee.ID == "" {
+				guardErr = fmt.Errorf("editor: cannot change signature for %q because a call site is unresolved", target.Name)
+				return false
+			}
+			if target.Kind == SymbolMethod && callee.ID != target.ID {
+				guardErr = fmt.Errorf("editor: cannot change signature for %q because selector call sites are ambiguous", target.Name)
+				return false
+			}
+			if callee.ID == target.ID && call.Ellipsis.IsValid() {
+				guardErr = fmt.Errorf("editor: cannot change signature for %q because a call site uses variadic expansion", target.Name)
+				return false
+			}
+			return true
+		})
+		if guardErr != nil {
+			return guardErr
+		}
+	}
+	return nil
+}
+
+func functionIsVariadic(fn *ast.FuncDecl) bool {
+	if fn.Type == nil || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		return false
+	}
+	_, ok := fn.Type.Params.List[len(fn.Type.Params.List)-1].Type.(*ast.Ellipsis)
+	return ok
+}
+
+func methodNameAmbiguous(idx *index, target Symbol) bool {
+	count := 0
+	for _, sym := range idx.symbols {
+		if sym.UnitID == target.UnitID && sym.Kind == SymbolMethod && sym.Name == target.Name {
+			count++
+			if count > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func callExprName(expr ast.Expr) string {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.SelectorExpr:
+		return x.Sel.Name
+	default:
+		return ""
 	}
 }
 

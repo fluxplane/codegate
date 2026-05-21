@@ -188,6 +188,31 @@ type Diagnostic struct {
 	Message  string
 }
 
+type ValidationKind string
+
+const (
+	ValidationParse     ValidationKind = "parse"
+	ValidationTypecheck ValidationKind = "typecheck"
+)
+
+type ValidationOptions struct {
+	Scope Scope
+	Kinds []ValidationKind
+}
+
+type ValidationResult struct {
+	Passed         bool
+	Kinds          []ValidationKind
+	Diagnostics    []Diagnostic
+	AffectedPaths  []string
+	ResolutionMode string
+	Complete       bool
+}
+
+type Validator interface {
+	Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error)
+}
+
 type Evidence struct {
 	Kind     string
 	Message  string

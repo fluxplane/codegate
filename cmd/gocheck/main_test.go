@@ -41,8 +41,8 @@ func Use() string {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(output, "occurrences:") || !strings.Contains(output, "import=") || !strings.Contains(output, "call=") {
-		t.Fatalf("expected occurrence counts in output:\n%s", output)
+	if !strings.Contains(output, "validation: passed=true") || !strings.Contains(output, "limitations: ast_only=true") || !strings.Contains(output, "occurrences:") || !strings.Contains(output, "import=") || !strings.Contains(output, "call=") {
+		t.Fatalf("expected validation, limitation, and occurrence counts in output:\n%s", output)
 	}
 }
 

@@ -18,6 +18,9 @@ type (
 	Occurrence              = core.Occurrence
 	Edge                    = core.Edge
 	Diagnostic              = core.Diagnostic
+	ValidationKind          = core.ValidationKind
+	ValidationOptions       = core.ValidationOptions
+	ValidationResult        = core.ValidationResult
 	Evidence                = core.Evidence
 	Scope                   = core.Scope
 	SymbolSelector          = core.SymbolSelector
@@ -66,6 +69,11 @@ type (
 )
 
 const Go = core.Go
+
+const (
+	ValidationParse     = core.ValidationParse
+	ValidationTypecheck = core.ValidationTypecheck
+)
 
 const (
 	SymbolPackage   = core.SymbolPackage

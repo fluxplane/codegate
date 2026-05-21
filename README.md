@@ -17,6 +17,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
 - Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
 - Pluggable language backend contract via `editor.Backend`.
+- Optional validation through parse/typecheck-capable backends.
 - Go AST backend for:
   - package discovery
   - outlines and symbol search
@@ -25,6 +26,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - references from selectors or source positions
   - direct and reverse imports
   - direct callers and callees
+  - parse and opt-in typecheck validation
   - best-effort implementation matching
   - package pressure metrics
 - Semantic Go edits through `ChangeSet`:
@@ -41,6 +43,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - add or remove Go interface methods
   - extract Go functions or methods from explicit source ranges
 - Unified diff preview before commit.
+- Conservative safety guards for generated files, shadowing-prone parameter edits, ambiguous field selectors, and unsupported signature call sites.
 - Refactoring proposals for simple AST-derived signals:
   - unused private symbols
   - large functions
@@ -177,6 +180,7 @@ Supported today:
 - optional import reconciliation when moving symbols between Go files
 - package and symbol metrics plus AST-derived refactoring proposals
 - executable refactor proposals for unused private symbols; advisory proposals for larger design-dependent refactors
+- parse/typecheck validation and AST limitation summaries through `editor.Validate` and `cmd/gocheck`
 - agentruntime-style source integration through context-aware reads and workspace walks
 
 Current limitations:
@@ -197,10 +201,9 @@ Upcoming work:
 2. Add an explicit OS filesystem adapter for durable commits outside core.
 3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 4. Improve dynamic call limitations and type-aware selector classification.
-5. Expand refactoring validation for shadowing, field selector type checks, method dispatch, and complex call expressions.
+5. Add validation adapters for explicit build/test workflows.
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
-7. Add validation adapters for parse/typecheck/build/test workflows.
-8. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
+7. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
 
 ## Non-goals
 

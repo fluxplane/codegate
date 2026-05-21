@@ -49,6 +49,10 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	if err != nil {
 		return err
 	}
+	validation, err := ed.Validate(ctx, editor.ValidationOptions{Scope: scope, Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck}})
+	if err != nil {
+		return err
+	}
 	proposals, err := ed.SuggestRefactorings(ctx, editor.WithSuggestScope(scope))
 	if err != nil {
 		return err
@@ -62,6 +66,10 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	if err != nil {
 		return err
 	}
+	limitations, err := goast.CallSiteLimitations(ctx, source, scope)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("root: %s\n", root)
 	fmt.Printf("go files: %d\n", goFiles)
@@ -69,6 +77,9 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	fmt.Printf("symbols: %d\n", len(symbols))
 	fmt.Printf("imports: %d\n", len(imports))
 	fmt.Printf("diagnostics: %d\n", len(packages.Diagnostics)+len(metrics.Diagnostics))
+	fmt.Printf("validation: passed=%t mode=%s diagnostics=%d files=%d\n", validation.Passed, validation.ResolutionMode, len(validation.Diagnostics), len(validation.AffectedPaths))
+	printValidationDiagnostics(validation.Diagnostics, 8)
+	fmt.Printf("limitations: ast_only=true selector_calls=%d complex_callees=%d variadic_calls=%d\n", limitations.SelectorCalls, limitations.ComplexCallees, limitations.VariadicCalls)
 	fmt.Printf("occurrences: %s\n", formatOccurrenceCounts(occurrenceCounts(goIndex.Occurrences)))
 	fmt.Println()
 
@@ -170,6 +181,22 @@ func printTopMetrics(units []editor.UnitMetrics, limit int) {
 			unit.CallFanOut,
 			unit.PublicSymbolCount,
 		)
+	}
+}
+
+func printValidationDiagnostics(diagnostics []editor.Diagnostic, limit int) {
+	if len(diagnostics) == 0 {
+		return
+	}
+	if limit < 0 || limit > len(diagnostics) {
+		limit = len(diagnostics)
+	}
+	for _, diagnostic := range diagnostics[:limit] {
+		loc := diagnostic.Location
+		fmt.Printf("  validation %s:%d:%d %s\n", loc.URI, loc.Range.Start.Line, loc.Range.Start.Column, diagnostic.Message)
+	}
+	if limit < len(diagnostics) {
+		fmt.Printf("  validation ... %d more\n", len(diagnostics)-limit)
 	}
 }
 

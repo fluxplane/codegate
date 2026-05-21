@@ -423,6 +423,79 @@ func (e *Editor) Metrics(ctx context.Context, scope Scope) (Metrics, error) {
 	return Metrics{Units: computeMetrics(idx), Symbols: computeSymbolMetrics(idx), Diagnostics: idx.Diagnostics}, nil
 }
 
+func (e *Editor) Validate(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
+	kinds := normalizeValidationKinds(opts.Kinds)
+	opts.Kinds = kinds
+	result := ValidationResult{
+		Passed:        true,
+		Kinds:         append([]ValidationKind(nil), kinds...),
+		AffectedPaths: []string{},
+		Complete:      true,
+	}
+	seenPath := map[string]bool{}
+	for _, backend := range e.selectedBackends(opts.Scope) {
+		if ctx.Err() != nil {
+			return ValidationResult{}, ctx.Err()
+		}
+		validator, ok := backend.(Validator)
+		if !ok {
+			spec := backend.Spec()
+			result.Passed = false
+			result.Complete = false
+			result.Diagnostics = append(result.Diagnostics, Diagnostic{Severity: "warning", Message: fmt.Sprintf("backend %q does not support validation", spec.Name)})
+			continue
+		}
+		next, err := validator.Validate(ctx, e.snapshot(nil), opts)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		if !next.Passed {
+			result.Passed = false
+		}
+		if !next.Complete {
+			result.Complete = false
+		}
+		if result.ResolutionMode == "" || next.ResolutionMode == "typecheck" {
+			result.ResolutionMode = next.ResolutionMode
+		}
+		result.Diagnostics = append(result.Diagnostics, next.Diagnostics...)
+		for _, p := range next.AffectedPaths {
+			p = core.CleanPath(p)
+			if !seenPath[p] {
+				seenPath[p] = true
+				result.AffectedPaths = append(result.AffectedPaths, p)
+			}
+		}
+	}
+	if result.ResolutionMode == "" {
+		result.ResolutionMode = e.resolutionMode(opts.Scope)
+	}
+	sort.Strings(result.AffectedPaths)
+	if len(result.Diagnostics) > 0 {
+		result.Passed = false
+	}
+	return result, nil
+}
+
+func normalizeValidationKinds(kinds []ValidationKind) []ValidationKind {
+	if len(kinds) == 0 {
+		return []ValidationKind{ValidationParse}
+	}
+	seen := map[ValidationKind]bool{}
+	out := make([]ValidationKind, 0, len(kinds))
+	for _, kind := range kinds {
+		if kind == "" || seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		out = append(out, kind)
+	}
+	if len(out) == 0 {
+		return []ValidationKind{ValidationParse}
+	}
+	return out
+}
+
 func (e *Editor) ReadSymbol(ctx context.Context, sel SymbolSelector) (SourceFragment, error) {
 	return e.readSymbol(ctx, sel, nil)
 }

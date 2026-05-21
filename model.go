@@ -21,6 +21,10 @@ type (
 	EdgeKind          = core.EdgeKind
 	Edge              = core.Edge
 	Diagnostic        = core.Diagnostic
+	ValidationKind    = core.ValidationKind
+	ValidationOptions = core.ValidationOptions
+	ValidationResult  = core.ValidationResult
+	Validator         = core.Validator
 	Evidence          = core.Evidence
 	Scope             = core.Scope
 	SymbolSelector    = core.SymbolSelector
@@ -43,6 +47,11 @@ type (
 	SymbolMetrics     = core.SymbolMetrics
 	Metrics           = core.Metrics
 	ChangedFile       = core.ChangedFile
+)
+
+const (
+	ValidationParse     = core.ValidationParse
+	ValidationTypecheck = core.ValidationTypecheck
 )
 
 const (
