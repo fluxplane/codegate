@@ -245,6 +245,24 @@ claude plugin validate ./plugins/codegate
 
 Claude Code currently installs persistent plugins through marketplaces. For direct use from GitHub, clone or sparse-checkout this repository and pass the plugin directory with `--plugin-dir`.
 
+## Codex Plugin
+
+The same [`plugins/codegate`](plugins/codegate) folder also includes a Codex plugin manifest in `plugins/codegate/.codex-plugin/plugin.json`. It reuses the `codegate-workflow` skill and is discoverable through this repository's Codex plugin catalog at `.agents/plugins/marketplace.json`.
+
+Add the GitHub repository as a Codex marketplace:
+
+```sh
+codex plugin marketplace add fluxplane/codegate
+```
+
+During local plugin development, add the checkout directly:
+
+```sh
+codex plugin marketplace add .
+```
+
+The Codex catalog entry points at `./plugins/codegate`, so the Claude and Codex plugin metadata stay bundled with the codegate workflow assets.
+
 ## Quality Badges
 
 CI systems can turn the JSON report into a README badge. Badges should name the assessed language, because each language backend declares its own available metrics and findings. A simple static Go badge convention is:

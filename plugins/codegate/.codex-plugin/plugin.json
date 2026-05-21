@@ -1,0 +1,37 @@
+{
+  "name": "codegate",
+  "version": "0.1.0",
+  "description": "Codex workflows for structured code assessment, quality review, and codegate-driven improvement loops.",
+  "author": {
+    "name": "Fluxplane",
+    "url": "https://github.com/fluxplane"
+  },
+  "homepage": "https://github.com/fluxplane/codegate#readme",
+  "repository": "https://github.com/fluxplane/codegate",
+  "license": "MIT",
+  "keywords": [
+    "code-quality",
+    "architecture",
+    "assessment",
+    "agents"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codegate",
+    "shortDescription": "Run codegate assessments and interpret structured quality findings.",
+    "longDescription": "Codegate gives Codex a structured workflow for assessing repository quality, architecture boundaries, maintainability, safety, and improvement opportunities before and after code changes.",
+    "developerName": "Fluxplane",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/fluxplane/codegate",
+    "defaultPrompt": [
+      "Assess this repo with codegate.",
+      "Use codegate before and after this refactor.",
+      "Review architecture findings with codegate."
+    ],
+    "brandColor": "#00ADD8"
+  }
+}

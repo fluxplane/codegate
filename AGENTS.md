@@ -84,3 +84,24 @@
 - Claude Code persistent installs currently go through marketplaces. For direct
   repository use, document `--plugin-dir` against a local checkout or sparse
   checkout of `plugins/codegate`.
+
+## Codex Plugin
+
+- The Codex plugin manifest also lives in `plugins/codegate`:
+  - `plugins/codegate/.codex-plugin/plugin.json`
+- Keep the Codex plugin in the same `plugins/codegate` bundle as the Claude
+  plugin so shared workflow assets stay in one place.
+- The Codex plugin catalog lives at `.agents/plugins/marketplace.json`.
+  It should be named for this repository, not a broad organization marketplace,
+  and point at `./plugins/codegate` with source type `local`.
+- Validate marketplace discovery with a temporary Codex home when changing the
+  marketplace or manifest. Use local checkout validation before pushing:
+  ```sh
+  CODEX_HOME=/tmp/codegate-codex-test-home codex plugin marketplace add .
+  ```
+- After pushing catalog changes, verify remote GitHub discovery:
+  ```sh
+  CODEX_HOME=/tmp/codegate-codex-remote-test codex plugin marketplace add fluxplane/codegate
+  ```
+- Do not add root Claude marketplace metadata under `.claude-plugin/` when
+  working on the Codex marketplace. These systems use separate entry points.
