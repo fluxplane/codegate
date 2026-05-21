@@ -1,10 +1,10 @@
-package editor
+package codegate
 
 import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/codegate/internal/core"
 )
 
 func computeMetrics(idx *core.Index) []UnitMetrics {

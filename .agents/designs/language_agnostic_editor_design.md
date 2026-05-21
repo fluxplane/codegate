@@ -2,7 +2,7 @@
 
 ## 1. Context
 
-This repository, `github.com/codewandler/editor`, should become a small embeddable editing and refactoring library.
+This repository, `github.com/codewandler/codegate`, should become a small embeddable editing and refactoring library.
 
 The first concrete use case is Go source editing. Later, the same model should support additional languages, likely through tree-sitter-backed parsers or language-specific AST/type backends.
 

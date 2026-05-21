@@ -1,4 +1,4 @@
-package editor
+package codegate
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/codewandler/editor/internal/core"
-	"github.com/codewandler/editor/internal/lang/goast"
-	"github.com/codewandler/editor/internal/lang/markdown"
+	"github.com/codewandler/codegate/internal/core"
+	"github.com/codewandler/codegate/internal/lang/goast"
+	"github.com/codewandler/codegate/internal/lang/markdown"
 )
 
 type Option func(*Editor) error
@@ -30,7 +30,7 @@ type Editor struct {
 	overlay map[string][]byte
 }
 
-func New(root string, opts ...Option) (*Editor, error) {
+func NewEditor(root string, opts ...Option) (*Editor, error) {
 	ed := &Editor{
 		root:      core.CleanPath(root),
 		languages: []LanguageID{Go},
@@ -43,7 +43,7 @@ func New(root string, opts ...Option) (*Editor, error) {
 		}
 	}
 	if ed.fsys == nil && ed.source == nil {
-		return nil, errors.New("editor: WithFS or WithSource is required")
+		return nil, errors.New("codegate: WithFS or WithSource is required")
 	}
 	if _, ok := ed.backends[Go]; !ok {
 		ed.backends[Go] = goast.New()
@@ -53,16 +53,26 @@ func New(root string, opts ...Option) (*Editor, error) {
 	}
 	for _, lang := range ed.languages {
 		if _, ok := ed.backends[lang]; !ok {
-			return nil, fmt.Errorf("editor: no backend registered for language %q", lang)
+			return nil, fmt.Errorf("codegate: no backend registered for language %q", lang)
 		}
 	}
 	return ed, nil
 }
 
+func withLanguages(langs []LanguageID) Option {
+	return func(ed *Editor) error {
+		if len(langs) == 0 {
+			return errors.New("codegate: no languages")
+		}
+		ed.languages = append([]LanguageID(nil), langs...)
+		return nil
+	}
+}
+
 func WithFS(fsys fs.FS) Option {
 	return func(ed *Editor) error {
 		if fsys == nil {
-			return errors.New("editor: nil fs.FS")
+			return errors.New("codegate: nil fs.FS")
 		}
 		ed.fsys = fsys
 		return nil
@@ -72,7 +82,7 @@ func WithFS(fsys fs.FS) Option {
 func WithSource(source Source) Option {
 	return func(ed *Editor) error {
 		if source == nil {
-			return errors.New("editor: nil source")
+			return errors.New("codegate: nil source")
 		}
 		ed.source = source
 		return nil
@@ -82,7 +92,7 @@ func WithSource(source Source) Option {
 func WithLanguage(lang LanguageID) Option {
 	return func(ed *Editor) error {
 		if lang == "" {
-			return errors.New("editor: empty language")
+			return errors.New("codegate: empty language")
 		}
 		ed.languages = []LanguageID{lang}
 		return nil
@@ -92,11 +102,11 @@ func WithLanguage(lang LanguageID) Option {
 func WithBackend(backend Backend) Option {
 	return func(ed *Editor) error {
 		if backend == nil {
-			return errors.New("editor: nil backend")
+			return errors.New("codegate: nil backend")
 		}
 		spec := backend.Spec()
 		if spec.Language == "" {
-			return errors.New("editor: backend has empty language")
+			return errors.New("codegate: backend has empty language")
 		}
 		ed.backends[spec.Language] = backend
 		return nil
@@ -515,10 +525,10 @@ func (e *Editor) readSymbol(ctx context.Context, sel SymbolSelector, overlay map
 	}
 	matches := core.FilterSymbols(idx.Symbols, sel)
 	if len(matches) == 0 {
-		return SourceFragment{}, errors.New("editor: symbol not found")
+		return SourceFragment{}, errors.New("codegate: symbol not found")
 	}
 	if len(matches) > 1 {
-		return SourceFragment{}, fmt.Errorf("editor: selector is ambiguous: %d symbols match", len(matches))
+		return SourceFragment{}, fmt.Errorf("codegate: selector is ambiguous: %d symbols match", len(matches))
 	}
 	sym := matches[0]
 	b, err := e.readFileWithOverlay(ctx, sym.Location.URI, overlay)
@@ -527,7 +537,7 @@ func (e *Editor) readSymbol(ctx context.Context, sel SymbolSelector, overlay map
 	}
 	start, end := sym.Location.Range.Start.Offset, sym.Location.Range.End.Offset
 	if start < 0 || end > len(b) || start > end {
-		return SourceFragment{}, errors.New("editor: invalid symbol range")
+		return SourceFragment{}, errors.New("codegate: invalid symbol range")
 	}
 	return SourceFragment{
 		Symbol:   sym,
@@ -655,7 +665,7 @@ func (e *Editor) backendForOperation(op Operation) (Backend, error) {
 			return backend, nil
 		}
 	}
-	return nil, fmt.Errorf("editor: no backend supports operation %q", op.Kind())
+	return nil, fmt.Errorf("codegate: no backend supports operation %q", op.Kind())
 }
 
 func (e *Editor) readFileWithOverlay(ctx context.Context, filePath string, overlay map[string][]byte) ([]byte, error) {

@@ -1,26 +1,26 @@
-# editor
+# codegate
 
-`editor` is a small Go library for source-aware navigation, assessment, and controlled code edits. It is moving toward the publishable `codegate` shape: an agent-oriented engine that can look up code facts, assess quality, suggest fixes, apply explicit operations, validate pending changes, and reassess.
+`codegate` is an agent-oriented code improvement engine for source-aware lookup, quality assessment, suggestions, explicit edits, validation, and reassessment.
 
 The module is:
 
 ```text
-github.com/codewandler/editor
+github.com/codewandler/codegate
 ```
 
-The core API is language-agnostic: callers work with symbols, ranges, occurrences, imports, call edges, proposals, and explicit change sets. Go is the first backend, implemented under `internal/lang/goast`, and other languages can be added by registering another backend.
+The core API is language-agnostic: callers work with symbols, ranges, occurrences, imports, call edges, proposals, and explicit change sets. Languages are registered explicitly through backend packages such as `language/golang` and `language/markdown`.
 
 ## Features
 
 - `fs.FS`-backed workspaces with in-memory overlay commits.
-- Direct source/workspace integration via `editor.WithSource`.
-- Public engine facade via `editor.NewEngine()` for agent loops.
+- Direct source/workspace integration via `codegate.WithSource`.
+- Public engine facade via `codegate.New()` for agent loops.
 - Agent-readable `Lookup`, `Assess`, `Suggest`, `Validate`, and capability reporting APIs.
 - Language-neutral assessment provider contract with architecture, maintainability, safety, and coverage gates.
 - Cobra CLI skeleton in `cmd/codegate` for JSON-first agent/LLM skill usage.
 - Agentruntime workspace integration helpers via `adapter/agentruntime`.
 - No hidden disk writes, git commands, shell execution, or local path assumptions in core.
-- Pluggable language backend contract via `editor.Backend`.
+- Pluggable language backend contract via `codegate.Backend`.
 - Built-in language backends for Go and Markdown.
 - Optional validation through parse/typecheck-capable backends.
 - Go AST backend for:
@@ -78,7 +78,7 @@ import (
 	"fmt"
 	"testing/fstest"
 
-	"github.com/codewandler/editor"
+	"github.com/codewandler/codegate"
 )
 
 func main() {
@@ -93,14 +93,14 @@ func hello() string {
 `)},
 	}
 
-	ed, err := editor.New(".", editor.WithFS(fsys), editor.WithLanguage(editor.Go))
+	ed, err := codegate.NewEditor(".", codegate.WithFS(fsys), codegate.WithLanguage(codegate.Go))
 	if err != nil {
 		panic(err)
 	}
 
-	fragment, err := ed.ReadSymbol(ctx, editor.SymbolSelector{
+	fragment, err := ed.ReadSymbol(ctx, codegate.SymbolSelector{
 		Name: "hello",
-		Kind: editor.SymbolFunction,
+		Kind: codegate.SymbolFunction,
 	})
 	if err != nil {
 		panic(err)
@@ -108,8 +108,8 @@ func hello() string {
 	fmt.Println(fragment.Source)
 
 	changes := ed.NewChangeSet()
-	err = changes.Apply(ctx, editor.ReplaceFunction{
-		Target: editor.SymbolSelector{ID: fragment.Symbol.ID},
+	err = changes.Apply(ctx, codegate.ReplaceFunction{
+		Target: codegate.SymbolSelector{ID: fragment.Symbol.ID},
 		Source: `func hello() string {
 	return "hi"
 }`,
@@ -129,16 +129,22 @@ func hello() string {
 ## Engine Example
 
 ```go
-engine, err := editor.NewEngine().
+import (
+	"github.com/codewandler/codegate"
+	"github.com/codewandler/codegate/language/golang"
+)
+
+engine, err := codegate.New().
 	Roots(".").
 	WithSource(source).
+	WithLanguage(golang.New(golang.Config{})).
 	Build(ctx)
 if err != nil {
 	panic(err)
 }
 
-report, err := engine.Assess(ctx, editor.AssessmentOptions{
-	Scope: editor.Scope{Language: editor.Go},
+report, err := engine.Assess(ctx, codegate.AssessmentOptions{
+	Scope: codegate.Scope{Language: codegate.Go},
 })
 if err != nil {
 	panic(err)
@@ -147,7 +153,7 @@ if err != nil {
 _ = report.Summary.Score
 ```
 
-The lower-level `editor.New` API remains available for direct source editing. The engine facade is the preferred public shape for agent workflows.
+The lower-level `codegate.NewEditor` API remains available for direct source editing. The engine facade is the preferred public shape for agent workflows.
 
 The CLI exposes the same assessment gates for agent skills:
 
@@ -182,7 +188,7 @@ source, err := agentruntime.NewWalkSource(
 		return out, truncated, err
 	},
 )
-ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor.Go))
+ed, err := codegate.NewEditor(".", codegate.WithSource(source), codegate.WithLanguage(codegate.Go))
 ```
 
 ## Architecture
@@ -192,13 +198,13 @@ The root package exposes the public facade and language-neutral model. The share
 Core responsibilities:
 
 - hold a logical workspace root
-- read source from an explicit `fs.FS` or `editor.Source`
+- read source from an explicit `fs.FS` or `codegate.Source`
 - maintain in-memory overlays
 - dispatch language operations to registered backends
 - apply language-neutral text edits
 - generate diffs and commit overlays
 
-Adapters live outside core. They translate host-specific workspace APIs into `editor.Source` without making the editor depend on those hosts.
+Adapters live outside core. They translate host-specific workspace APIs into `codegate.Source` without making codegate depend on those hosts.
 
 Backend responsibilities:
 
@@ -225,7 +231,7 @@ Supported today:
 - optional import reconciliation when moving symbols between Go files
 - package and symbol metrics plus AST-derived refactoring proposals
 - executable refactor proposals for unused private symbols; advisory proposals for larger design-dependent refactors
-- parse/typecheck validation and AST limitation summaries through `editor.Validate` and `cmd/gocheck`
+- parse/typecheck validation and AST limitation summaries through `codegate.Validate` and `cmd/gocheck`
 - agentruntime-style source integration through context-aware reads and workspace walks
 
 Current limitations:

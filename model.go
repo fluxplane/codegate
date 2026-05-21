@@ -1,6 +1,6 @@
-package editor
+package codegate
 
-import "github.com/codewandler/editor/internal/core"
+import "github.com/codewandler/codegate/internal/core"
 
 type (
 	LanguageID        = core.LanguageID

@@ -1,4 +1,4 @@
-package editor
+package codegate
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+
+	"github.com/codewandler/codegate/internal/lang/goast"
+	internalmarkdown "github.com/codewandler/codegate/internal/lang/markdown"
 )
 
 func TestEngineLookupAssessValidate(t *testing.T) {
@@ -23,7 +26,11 @@ func helper() string {
 `)
 
 	ctx := context.Background()
-	eng, err := NewEngine().Roots(".").WithFS(os.DirFS(root)).Build(ctx)
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +61,11 @@ func helper() string {
 }
 
 func TestEngineCapabilities(t *testing.T) {
-	eng, err := NewEngine().WithFS(fstest.MapFS{}).Build(context.Background())
+	eng, err := New().
+		WithFS(fstest.MapFS{}).
+		WithLanguage(goast.New()).
+		WithLanguage(internalmarkdown.New()).
+		Build(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +92,12 @@ See [Missing](#missing).
 `)
 
 	ctx := context.Background()
-	eng, err := NewEngine().Roots(".").WithFS(os.DirFS(root)).Build(ctx)
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		WithLanguage(internalmarkdown.New()).
+		Build(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +156,11 @@ func TestEngineAssessReportsMaintainabilityFindings(t *testing.T) {
 	}
 	writeEngineFile(t, root, "demo.go", src)
 
-	eng, err := NewEngine().Roots(".").WithFS(os.DirFS(root)).Build(context.Background())
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +181,11 @@ func TestEngineAssessReportsValidationViolations(t *testing.T) {
 	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
 	writeEngineFile(t, root, "broken.go", "package demo\n\nfunc Broken( {\n")
 
-	eng, err := NewEngine().Roots(".").WithFS(os.DirFS(root)).Build(context.Background())
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +199,7 @@ func TestEngineAssessReportsValidationViolations(t *testing.T) {
 }
 
 func TestEngineRejectsMultipleRootsForNow(t *testing.T) {
-	_, err := NewEngine().Roots("one", "two").Build(context.Background())
+	_, err := New().Roots("one", "two").WithLanguage(goast.New()).Build(context.Background())
 	if err == nil {
 		t.Fatal("expected multiple roots to fail until multi-root source support lands")
 	}

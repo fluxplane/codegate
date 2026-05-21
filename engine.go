@@ -1,4 +1,4 @@
-package editor
+package codegate
 
 import (
 	"context"
@@ -20,23 +20,27 @@ type Engine interface {
 }
 
 type EngineBuilder struct {
-	roots    []string
-	source   Source
-	fsys     fs.FS
-	backends []Backend
-	language LanguageID
-	err      error
+	roots     []string
+	source    Source
+	fsys      fs.FS
+	backends  []Backend
+	languages []LanguageID
+	language  LanguageID
+	err       error
 }
 
-// NewEngine creates the public codegate-style builder. The existing New
-// constructor remains for compatibility with the lower-level Editor API.
+func New() *EngineBuilder {
+	return &EngineBuilder{roots: []string{"."}}
+}
+
+// NewEngine is a compatibility alias for New.
 func NewEngine() *EngineBuilder {
-	return &EngineBuilder{roots: []string{"."}, language: Go}
+	return New()
 }
 
 func (b *EngineBuilder) Roots(roots ...string) *EngineBuilder {
 	if len(roots) == 0 {
-		b.err = errors.New("editor: Roots requires at least one root")
+		b.err = errors.New("codegate: Roots requires at least one root")
 		return b
 	}
 	b.roots = append([]string(nil), roots...)
@@ -45,7 +49,7 @@ func (b *EngineBuilder) Roots(roots ...string) *EngineBuilder {
 
 func (b *EngineBuilder) WithSource(source Source) *EngineBuilder {
 	if source == nil {
-		b.err = errors.New("editor: nil source")
+		b.err = errors.New("codegate: nil source")
 		return b
 	}
 	b.source = source
@@ -54,7 +58,7 @@ func (b *EngineBuilder) WithSource(source Source) *EngineBuilder {
 
 func (b *EngineBuilder) WithFS(fsys fs.FS) *EngineBuilder {
 	if fsys == nil {
-		b.err = errors.New("editor: nil fs.FS")
+		b.err = errors.New("codegate: nil fs.FS")
 		return b
 	}
 	b.fsys = fsys
@@ -63,12 +67,17 @@ func (b *EngineBuilder) WithFS(fsys fs.FS) *EngineBuilder {
 
 func (b *EngineBuilder) WithLanguage(backend Backend) *EngineBuilder {
 	if backend == nil {
-		b.err = errors.New("editor: nil language backend")
+		b.err = errors.New("codegate: nil language backend")
 		return b
 	}
 	b.backends = append(b.backends, backend)
 	spec := backend.Spec()
-	if b.language == "" || b.language == Go {
+	if spec.Language == "" {
+		b.err = errors.New("codegate: language backend has empty language")
+		return b
+	}
+	b.languages = append(b.languages, spec.Language)
+	if b.language == "" {
 		b.language = spec.Language
 	}
 	return b
@@ -82,13 +91,16 @@ func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 		return nil, b.err
 	}
 	if len(b.roots) != 1 {
-		return nil, fmt.Errorf("editor: engine currently supports exactly one root, got %d", len(b.roots))
+		return nil, fmt.Errorf("codegate: engine currently supports exactly one root, got %d", len(b.roots))
 	}
 	root := b.roots[0]
 	if b.source == nil && b.fsys == nil {
-		return nil, errors.New("editor: engine requires WithSource or WithFS")
+		return nil, errors.New("codegate: engine requires WithSource or WithFS")
 	}
-	opts := []Option{WithLanguage(b.language)}
+	if len(b.backends) == 0 {
+		return nil, errors.New("codegate: engine requires at least one language backend")
+	}
+	opts := []Option{withLanguages(b.languages)}
 	if b.source != nil {
 		opts = append(opts, WithSource(b.source))
 	} else {
@@ -97,16 +109,17 @@ func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 	for _, backend := range b.backends {
 		opts = append(opts, WithBackend(backend))
 	}
-	ed, err := New(root, opts...)
+	ed, err := NewEditor(root, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &engine{root: root, editor: ed}, nil
+	return &engine{root: root, editor: ed, language: b.language}, nil
 }
 
 type engine struct {
-	root   string
-	editor *Editor
+	root     string
+	editor   *Editor
+	language LanguageID
 }
 
 func (e *engine) Lookup(ctx context.Context, query LookupQuery) (LookupResult, error) {
@@ -115,7 +128,7 @@ func (e *engine) Lookup(ctx context.Context, query LookupQuery) (LookupResult, e
 		scope.Language = query.Language
 	}
 	if scope.Language == "" {
-		scope.Language = Go
+		scope.Language = e.language
 	}
 	if query.IncludeTests != nil {
 		scope.IncludeTests = *query.IncludeTests
@@ -192,7 +205,7 @@ func (e *engine) Lookup(ctx context.Context, query LookupQuery) (LookupResult, e
 func (e *engine) Assess(ctx context.Context, opts AssessmentOptions) (AssessmentReport, error) {
 	scope := opts.Scope
 	if scope.Language == "" {
-		scope.Language = Go
+		scope.Language = e.language
 	}
 	opts.Scope = scope
 	var reports []AssessmentReport
@@ -225,8 +238,9 @@ func (e *engine) NewChangeSet() *ChangeSet {
 }
 
 func (e *engine) Capabilities() []BackendSpec {
-	specs := make([]BackendSpec, 0, len(e.editor.backends))
-	for _, backend := range e.editor.backends {
+	backends := e.editor.selectedBackends(Scope{})
+	specs := make([]BackendSpec, 0, len(backends))
+	for _, backend := range backends {
 		specs = append(specs, backend.Spec())
 	}
 	sort.Slice(specs, func(i, j int) bool {

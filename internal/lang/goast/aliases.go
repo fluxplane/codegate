@@ -1,6 +1,6 @@
 package goast
 
-import "github.com/codewandler/editor/internal/core"
+import "github.com/codewandler/codegate/internal/core"
 
 type (
 	BackendSpec             = core.BackendSpec

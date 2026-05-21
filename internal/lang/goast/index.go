@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/codegate/internal/core"
 )
 
 type GoBackend struct{}

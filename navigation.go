@@ -1,11 +1,11 @@
-package editor
+package codegate
 
 import (
 	"fmt"
 	"path"
 	"strings"
 
-	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/codegate/internal/core"
 )
 
 func (e *Editor) resolvePositionTarget(idx *core.Index, filePath string, offset int, fallbackEnclosing bool) (NavigationTarget, []Symbol, []Diagnostic) {

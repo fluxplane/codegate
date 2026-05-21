@@ -1,4 +1,4 @@
-package editor
+package codegate
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/codewandler/editor/internal/core"
-	"github.com/codewandler/editor/internal/lang/goast"
+	"github.com/codewandler/codegate/internal/core"
+	"github.com/codewandler/codegate/internal/lang/goast"
 )
 
 func newTestEditor(t *testing.T, files map[string]string) *Editor {
@@ -20,7 +20,7 @@ func newTestEditor(t *testing.T, files map[string]string) *Editor {
 	for p, src := range files {
 		fsys[p] = &fstest.MapFile{Data: []byte(src)}
 	}
-	ed, err := New(".", WithFS(fsys), WithLanguage(Go))
+	ed, err := NewEditor(".", WithFS(fsys), WithLanguage(Go))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2429,7 +2429,7 @@ func unusedHelper(flag bool, a int, b int, c int, d int) {}
 `),
 		},
 	}
-	ed, err := New(".", WithSource(source), WithLanguage(Go))
+	ed, err := NewEditor(".", WithSource(source), WithLanguage(Go))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2497,7 +2497,7 @@ func newTestEditorWithOptions(t *testing.T, files map[string]string, opts ...Opt
 	}
 	all := []Option{WithFS(fsys)}
 	all = append(all, opts...)
-	ed, err := New(".", all...)
+	ed, err := NewEditor(".", all...)
 	if err != nil {
 		t.Fatal(err)
 	}

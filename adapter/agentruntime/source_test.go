@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/codewandler/editor"
-	"github.com/codewandler/editor/adapter/agentruntime"
+	"github.com/codewandler/codegate"
+	"github.com/codewandler/codegate/adapter/agentruntime"
 )
 
 func TestWalkSourceIntegratesWithEditor(t *testing.T) {
@@ -51,11 +51,11 @@ func run() {}
 	if err != nil {
 		t.Fatal(err)
 	}
-	ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor.Go))
+	ed, err := codegate.NewEditor(".", codegate.WithSource(source), codegate.WithLanguage(codegate.Go))
 	if err != nil {
 		t.Fatal(err)
 	}
-	symbols, err := ed.FindSymbols(ctx, editor.SymbolSelector{Name: "run", Kind: editor.SymbolFunction})
+	symbols, err := ed.FindSymbols(ctx, codegate.SymbolSelector{Name: "run", Kind: codegate.SymbolFunction})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestWalkSourceReportsTruncatedReads(t *testing.T) {
 		func(context.Context, string, int64) ([]byte, bool, error) {
 			return []byte("package main\n"), true, nil
 		},
-		func(context.Context, editor.Scope) ([]string, error) {
+		func(context.Context, codegate.Scope) ([]string, error) {
 			return []string{"main.go"}, nil
 		},
 		agentruntime.WithMaxBytes(1),

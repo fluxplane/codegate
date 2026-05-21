@@ -10,7 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/codewandler/editor"
+	"github.com/codewandler/codegate"
+	"github.com/codewandler/codegate/language/golang"
+	"github.com/codewandler/codegate/language/markdown"
 	"github.com/spf13/cobra"
 )
 
@@ -29,26 +31,26 @@ type app struct {
 
 type suggestionSummary struct {
 	ID         string                 `json:"id"`
-	Kind       editor.RefactorKind    `json:"kind"`
+	Kind       codegate.RefactorKind  `json:"kind"`
 	Title      string                 `json:"title"`
 	Summary    string                 `json:"summary,omitempty"`
-	Confidence editor.Confidence      `json:"confidence"`
-	Risk       editor.RiskLevel       `json:"risk"`
+	Confidence codegate.Confidence    `json:"confidence"`
+	Risk       codegate.RiskLevel     `json:"risk"`
 	Operations int                    `json:"operations"`
 	Metrics    map[string]float64     `json:"metrics,omitempty"`
-	Evidence   []editor.Evidence      `json:"evidence,omitempty"`
+	Evidence   []codegate.Evidence    `json:"evidence,omitempty"`
 	Raw        map[string]interface{} `json:"raw,omitempty"`
 }
 
-type lookupQuery = editor.LookupQuery
+type lookupQuery = codegate.LookupQuery
 
 type cycleResult struct {
-	Assessment editor.AssessmentReport      `json:"assessment"`
-	Selected   *editor.AssessmentSuggestion `json:"selected,omitempty"`
-	Applied    bool                         `json:"applied"`
-	Validation *editor.ValidationSummary    `json:"validation,omitempty"`
-	Diff       string                       `json:"diff,omitempty"`
-	Message    string                       `json:"message,omitempty"`
+	Assessment codegate.AssessmentReport      `json:"assessment"`
+	Selected   *codegate.AssessmentSuggestion `json:"selected,omitempty"`
+	Applied    bool                           `json:"applied"`
+	Validation *codegate.ValidationSummary    `json:"validation,omitempty"`
+	Diff       string                         `json:"diff,omitempty"`
+	Message    string                         `json:"message,omitempty"`
 }
 
 func main() {
@@ -140,7 +142,7 @@ func (a *app) lookupCommand() *cobra.Command {
 		if offset >= 0 {
 			q.Offset = &offset
 		}
-		q.Kind = editor.SymbolKind(kind)
+		q.Kind = codegate.SymbolKind(kind)
 		if q.Path == "" && q.Name == "" && q.QualifiedName == "" {
 			return errors.New("lookup requires --path with a position or --name/--qualified-name")
 		}
@@ -183,7 +185,7 @@ func (a *app) suggestCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			proposals, err := eng.Suggest(cmd.Context(), editor.SuggestOptions{Scope: scope})
+			proposals, err := eng.Suggest(cmd.Context(), codegate.SuggestOptions{Scope: scope})
 			if err != nil {
 				return err
 			}
@@ -205,7 +207,7 @@ func (a *app) validateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := eng.Validate(cmd.Context(), editor.ValidationOptions{
+			result, err := eng.Validate(cmd.Context(), codegate.ValidationOptions{
 				Scope: scope,
 				Kinds: validationKinds(scope.Language),
 			})
@@ -225,12 +227,12 @@ func (a *app) cycleCommand() *cobra.Command {
 		Short: "Run assess -> suggest -> optionally apply -> validate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			assessment, err := a.assess(ctx, 20, []editor.AssessmentGate{editor.AssessmentGateAll})
+			assessment, err := a.assess(ctx, 20, []codegate.AssessmentGate{codegate.AssessmentGateAll})
 			if err != nil {
 				return err
 			}
 			result := cycleResult{Assessment: assessment}
-			var selected *editor.AssessmentSuggestion
+			var selected *codegate.AssessmentSuggestion
 			for i := range assessment.Suggestions {
 				if assessment.Suggestions[i].Operations > 0 {
 					next := assessment.Suggestions[i]
@@ -251,11 +253,11 @@ func (a *app) cycleCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			proposals, err := eng.Suggest(ctx, editor.SuggestOptions{Scope: scope})
+			proposals, err := eng.Suggest(ctx, codegate.SuggestOptions{Scope: scope})
 			if err != nil {
 				return err
 			}
-			var proposal editor.Proposal
+			var proposal codegate.Proposal
 			for _, candidate := range proposals {
 				if candidate.ID == selected.ID {
 					proposal = candidate
@@ -269,7 +271,7 @@ func (a *app) cycleCommand() *cobra.Command {
 			if err := changes.Apply(ctx, proposal.Operations...); err != nil {
 				return err
 			}
-			validation, err := changes.Validate(ctx, editor.ValidationOptions{
+			validation, err := changes.Validate(ctx, codegate.ValidationOptions{
 				Scope: scope,
 				Kinds: validationKinds(scope.Language),
 			})
@@ -281,7 +283,7 @@ func (a *app) cycleCommand() *cobra.Command {
 				return err
 			}
 			result.Applied = true
-			result.Validation = &editor.ValidationSummary{
+			result.Validation = &codegate.ValidationSummary{
 				Passed:         validation.Passed,
 				ResolutionMode: validation.ResolutionMode,
 				Diagnostics:    len(validation.Diagnostics),
@@ -296,33 +298,38 @@ func (a *app) cycleCommand() *cobra.Command {
 	return cmd
 }
 
-func (a *app) engine(ctx context.Context) (editor.Engine, editor.Scope, error) {
-	lang := editor.LanguageID(a.cfg.language)
+func (a *app) engine(ctx context.Context) (codegate.Engine, codegate.Scope, error) {
+	lang := codegate.LanguageID(a.cfg.language)
 	switch lang {
-	case editor.Go, editor.Markdown:
+	case codegate.Go, codegate.Markdown:
 	default:
-		return nil, editor.Scope{}, fmt.Errorf("language %q is not wired; supported languages: go, markdown", a.cfg.language)
+		return nil, codegate.Scope{}, fmt.Errorf("language %q is not wired; supported languages: go, markdown", a.cfg.language)
 	}
-	eng, err := editor.NewEngine().Roots(a.cfg.root).WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).Build(ctx)
+	eng, err := codegate.New().
+		Roots(a.cfg.root).
+		WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).
+		WithLanguage(golang.New(golang.Config{})).
+		WithLanguage(markdown.New(markdown.Config{})).
+		Build(ctx)
 	if err != nil {
-		return nil, editor.Scope{}, err
+		return nil, codegate.Scope{}, err
 	}
-	return eng, editor.Scope{Language: lang, IncludeTests: a.cfg.includeTests}, nil
+	return eng, codegate.Scope{Language: lang, IncludeTests: a.cfg.includeTests}, nil
 }
 
-func (a *app) assess(ctx context.Context, limit int, gates []editor.AssessmentGate) (editor.AssessmentReport, error) {
+func (a *app) assess(ctx context.Context, limit int, gates []codegate.AssessmentGate) (codegate.AssessmentReport, error) {
 	eng, scope, err := a.engine(ctx)
 	if err != nil {
-		return editor.AssessmentReport{}, err
+		return codegate.AssessmentReport{}, err
 	}
-	return eng.Assess(ctx, editor.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates})
+	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates})
 }
 
-func validationKinds(lang editor.LanguageID) []editor.ValidationKind {
-	if lang == editor.Go {
-		return []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck}
+func validationKinds(lang codegate.LanguageID) []codegate.ValidationKind {
+	if lang == codegate.Go {
+		return []codegate.ValidationKind{codegate.ValidationParse, codegate.ValidationTypecheck}
 	}
-	return []editor.ValidationKind{editor.ValidationParse}
+	return []codegate.ValidationKind{codegate.ValidationParse}
 }
 
 func (a *app) print(v interface{}) error {
@@ -334,21 +341,21 @@ func (a *app) print(v interface{}) error {
 	return enc.Encode(v)
 }
 
-func parseAssessmentGates(values []string) ([]editor.AssessmentGate, error) {
+func parseAssessmentGates(values []string) ([]codegate.AssessmentGate, error) {
 	if len(values) == 0 {
-		return []editor.AssessmentGate{editor.AssessmentGateAll}, nil
+		return []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil
 	}
-	seen := map[editor.AssessmentGate]bool{}
-	var out []editor.AssessmentGate
+	seen := map[codegate.AssessmentGate]bool{}
+	var out []codegate.AssessmentGate
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
 				continue
 			}
-			gate := editor.AssessmentGate(part)
+			gate := codegate.AssessmentGate(part)
 			switch gate {
-			case editor.AssessmentGateAll, editor.AssessmentGateArchitecture, editor.AssessmentGateMaintainability, editor.AssessmentGateSafety, editor.AssessmentGateCoverage:
+			case codegate.AssessmentGateAll, codegate.AssessmentGateArchitecture, codegate.AssessmentGateMaintainability, codegate.AssessmentGateSafety, codegate.AssessmentGateCoverage:
 				if !seen[gate] {
 					seen[gate] = true
 					out = append(out, gate)
@@ -359,7 +366,7 @@ func parseAssessmentGates(values []string) ([]editor.AssessmentGate, error) {
 		}
 	}
 	if len(out) == 0 {
-		return []editor.AssessmentGate{editor.AssessmentGateAll}, nil
+		return []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil
 	}
 	return out, nil
 }
@@ -368,7 +375,7 @@ type dirSource struct {
 	fsys fs.FS
 }
 
-func (s dirSource) ListFiles(ctx context.Context, scope editor.Scope) ([]string, error) {
+func (s dirSource) ListFiles(ctx context.Context, scope codegate.Scope) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -405,10 +412,10 @@ func (s dirSource) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return fs.ReadFile(s.fsys, path)
 }
 
-func summarizeSuggestions(proposals []editor.Proposal, executableOnly bool, limit int) []suggestionSummary {
+func summarizeSuggestions(proposals []codegate.Proposal, executableOnly bool, limit int) []suggestionSummary {
 	out := make([]suggestionSummary, 0, len(proposals))
 	for _, proposal := range proposals {
-		if executableOnly && !editor.HasOperations(proposal) {
+		if executableOnly && !codegate.HasOperations(proposal) {
 			continue
 		}
 		out = append(out, suggestionSummary{

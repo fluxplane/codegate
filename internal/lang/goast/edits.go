@@ -16,7 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/codegate/internal/core"
 )
 
 type editCompiler struct {
@@ -89,7 +89,7 @@ func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operat
 	case ExtractGoMethod:
 		edits, err = compiler.compileExtractGoMethod(ctx, x)
 	default:
-		return nil, fmt.Errorf("editor: go backend does not support operation %q", op.Kind())
+		return nil, fmt.Errorf("codegate: go backend does not support operation %q", op.Kind())
 	}
 	if err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func (c editCompiler) rejectGeneratedFileEdits(ctx context.Context, edits []File
 			return err
 		}
 		if isGeneratedGoSource(src) {
-			return fmt.Errorf("editor: refusing to refactor generated Go file %s", p)
+			return fmt.Errorf("codegate: refusing to refactor generated Go file %s", p)
 		}
 	}
 	return nil
@@ -242,7 +242,7 @@ func (c editCompiler) compileDeleteSymbol(ctx context.Context, op DeleteSymbol) 
 	}
 	sym := matches[0]
 	if sym.Kind == SymbolField {
-		return nil, errors.New("editor: DeleteSymbol does not delete fields; use struct tag operations for field metadata")
+		return nil, errors.New("codegate: DeleteSymbol does not delete fields; use struct tag operations for field metadata")
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
@@ -261,7 +261,7 @@ func (c editCompiler) compileDeleteFunction(ctx context.Context, op DeleteFuncti
 		sel.Kind = SymbolFunction
 	}
 	if sel.Kind != SymbolFunction {
-		return nil, errors.New("editor: DeleteFunction requires a function target")
+		return nil, errors.New("codegate: DeleteFunction requires a function target")
 	}
 	return c.compileDeleteSymbol(ctx, DeleteSymbol{Target: sel, ExpectedHash: op.ExpectedHash})
 }
@@ -272,7 +272,7 @@ func (c editCompiler) compileReplaceMethod(ctx context.Context, op ReplaceMethod
 		sel.Kind = SymbolMethod
 	}
 	if sel.Kind != SymbolMethod {
-		return nil, errors.New("editor: ReplaceMethod requires a method target")
+		return nil, errors.New("codegate: ReplaceMethod requires a method target")
 	}
 	return c.compileReplaceFunction(ctx, ReplaceFunction{Target: sel, Source: op.Source, ExpectedHash: op.ExpectedHash})
 }
@@ -283,7 +283,7 @@ func (c editCompiler) compileDeleteMethod(ctx context.Context, op DeleteMethod) 
 		sel.Kind = SymbolMethod
 	}
 	if sel.Kind != SymbolMethod {
-		return nil, errors.New("editor: DeleteMethod requires a method target")
+		return nil, errors.New("codegate: DeleteMethod requires a method target")
 	}
 	return c.compileDeleteSymbol(ctx, DeleteSymbol{Target: sel, ExpectedHash: op.ExpectedHash})
 }
@@ -323,7 +323,7 @@ func (c editCompiler) compileReplaceComment(ctx context.Context, op ReplaceComme
 
 func (c editCompiler) compileRenameSymbol(ctx context.Context, op RenameSymbol) ([]FileEdit, error) {
 	if !isValidIdentifier(op.NewName) {
-		return nil, fmt.Errorf("editor: invalid Go identifier %q", op.NewName)
+		return nil, fmt.Errorf("codegate: invalid Go identifier %q", op.NewName)
 	}
 	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Target))
 	if err != nil {
@@ -366,7 +366,7 @@ func (c editCompiler) compileRenameSymbol(ctx context.Context, op RenameSymbol) 
 		}
 	}
 	if len(editsByPath) == 0 {
-		return nil, errors.New("editor: rename produced no edits")
+		return nil, errors.New("codegate: rename produced no edits")
 	}
 	paths := make([]string, 0, len(editsByPath))
 	for p := range editsByPath {
@@ -390,11 +390,11 @@ func (c editCompiler) checkExpectedHash(ctx context.Context, sym Symbol, expecte
 	}
 	start, end := sym.Location.Range.Start.Offset, sym.Location.Range.End.Offset
 	if start < 0 || end > len(src) || start > end {
-		return errors.New("editor: invalid symbol range")
+		return errors.New("codegate: invalid symbol range")
 	}
 	actual := hashBytes(src[start:end])
 	if actual != expected {
-		return fmt.Errorf("editor: stale source for %s: expected hash %s, got %s", sym.QualifiedName, expected, actual)
+		return fmt.Errorf("codegate: stale source for %s: expected hash %s, got %s", sym.QualifiedName, expected, actual)
 	}
 	return nil
 }
@@ -409,11 +409,11 @@ func supportedRenameSymbol(sym Symbol) error {
 	case SymbolFunction, SymbolMethod, SymbolType, SymbolStruct, SymbolInterface, SymbolConst, SymbolVar:
 		return nil
 	case SymbolField:
-		return errors.New("editor: rename of Go struct fields is not supported")
+		return errors.New("codegate: rename of Go struct fields is not supported")
 	case SymbolPackage:
-		return errors.New("editor: rename of Go packages is not supported")
+		return errors.New("codegate: rename of Go packages is not supported")
 	default:
-		return fmt.Errorf("editor: rename of Go %s symbols is not supported", sym.Kind)
+		return fmt.Errorf("codegate: rename of Go %s symbols is not supported", sym.Kind)
 	}
 }
 
@@ -527,7 +527,7 @@ func (c editCompiler) compileRemoveStructTag(ctx context.Context, op RemoveGoStr
 
 func (c editCompiler) compileEnsureGoImport(ctx context.Context, op EnsureGoImport) ([]FileEdit, error) {
 	if op.ImportPath == "" {
-		return nil, errors.New("editor: EnsureGoImport requires ImportPath")
+		return nil, errors.New("codegate: EnsureGoImport requires ImportPath")
 	}
 	p, err := c.selectFile(ctx, op.Path, op.UnitID, "ensure import")
 	if err != nil {
@@ -553,7 +553,7 @@ func (c editCompiler) compileEnsureGoImport(ctx context.Context, op EnsureGoImpo
 
 func (c editCompiler) compileRemoveGoImport(ctx context.Context, op RemoveGoImport) ([]FileEdit, error) {
 	if op.ImportPath == "" {
-		return nil, errors.New("editor: RemoveGoImport requires ImportPath")
+		return nil, errors.New("codegate: RemoveGoImport requires ImportPath")
 	}
 	p, err := c.selectFile(ctx, op.Path, op.UnitID, "remove import")
 	if err != nil {
@@ -577,7 +577,7 @@ func (c editCompiler) compileRemoveGoImport(ctx context.Context, op RemoveGoImpo
 
 func (c editCompiler) compileRenameGoImport(ctx context.Context, op RenameGoImport) ([]FileEdit, error) {
 	if op.ImportPath == "" {
-		return nil, errors.New("editor: RenameGoImport requires ImportPath")
+		return nil, errors.New("codegate: RenameGoImport requires ImportPath")
 	}
 	p, err := c.selectFile(ctx, op.Path, op.UnitID, "rename import")
 	if err != nil {
@@ -593,7 +593,7 @@ func (c editCompiler) compileRenameGoImport(ctx context.Context, op RenameGoImpo
 	}
 	imp := findImportSpec(pf, op.ImportPath, "")
 	if imp == nil {
-		return nil, fmt.Errorf("editor: import %q not found", op.ImportPath)
+		return nil, fmt.Errorf("codegate: import %q not found", op.ImportPath)
 	}
 	r := rangeOf(pf.fset, imp.Pos(), imp.End())
 	return []FileEdit{{Path: p, Edits: []TextEdit{{Path: p, Range: r, Replacement: formatImportSpec(op.ImportPath, op.Alias)}}}}, nil
@@ -601,7 +601,7 @@ func (c editCompiler) compileRenameGoImport(ctx context.Context, op RenameGoImpo
 
 func (c editCompiler) compileMoveSymbol(ctx context.Context, op MoveSymbol) ([]FileEdit, error) {
 	if op.ToPath == "" {
-		return nil, errors.New("editor: MoveSymbol requires ToPath")
+		return nil, errors.New("codegate: MoveSymbol requires ToPath")
 	}
 	toPath := core.CleanPath(op.ToPath)
 	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Target))
@@ -616,7 +616,7 @@ func (c editCompiler) compileMoveSymbol(ctx context.Context, op MoveSymbol) ([]F
 		return nil, err
 	}
 	if sym.Location.URI == toPath {
-		return nil, errors.New("editor: MoveSymbol target file must differ from source file")
+		return nil, errors.New("codegate: MoveSymbol target file must differ from source file")
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
@@ -652,13 +652,13 @@ func (c editCompiler) compileMoveSymbol(ctx context.Context, op MoveSymbol) ([]F
 
 func (c editCompiler) compileAddGoParameter(ctx context.Context, op AddGoParameter) ([]FileEdit, error) {
 	if !isValidIdentifier(op.Name) {
-		return nil, fmt.Errorf("editor: invalid Go parameter name %q", op.Name)
+		return nil, fmt.Errorf("codegate: invalid Go parameter name %q", op.Name)
 	}
 	if strings.TrimSpace(op.Type) == "" {
-		return nil, errors.New("editor: AddGoParameter requires Type")
+		return nil, errors.New("codegate: AddGoParameter requires Type")
 	}
 	if strings.TrimSpace(op.DefaultValue) == "" {
-		return nil, errors.New("editor: AddGoParameter requires DefaultValue")
+		return nil, errors.New("codegate: AddGoParameter requires DefaultValue")
 	}
 	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
@@ -684,7 +684,7 @@ func (c editCompiler) compileAddGoParameter(ctx context.Context, op AddGoParamet
 
 func (c editCompiler) compileRemoveGoParameter(ctx context.Context, op RemoveGoParameter) ([]FileEdit, error) {
 	if op.Name == "" {
-		return nil, errors.New("editor: RemoveGoParameter requires Name")
+		return nil, errors.New("codegate: RemoveGoParameter requires Name")
 	}
 	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
@@ -712,7 +712,7 @@ func (c editCompiler) compileRemoveGoParameter(ctx context.Context, op RemoveGoP
 		}
 	}
 	if pos < 0 {
-		return nil, fmt.Errorf("editor: parameter %q not found", op.Name)
+		return nil, fmt.Errorf("codegate: parameter %q not found", op.Name)
 	}
 	replacement := ""
 	if groupNames > 1 {
@@ -728,7 +728,7 @@ func (c editCompiler) compileRemoveGoParameter(ctx context.Context, op RemoveGoP
 
 func (c editCompiler) compileRenameGoParameter(ctx context.Context, op RenameGoParameter) ([]FileEdit, error) {
 	if op.OldName == "" || !isValidIdentifier(op.NewName) {
-		return nil, errors.New("editor: RenameGoParameter requires valid OldName and NewName")
+		return nil, errors.New("codegate: RenameGoParameter requires valid OldName and NewName")
 	}
 	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
@@ -749,7 +749,7 @@ func (c editCompiler) compileRenameGoParameter(ctx context.Context, op RenameGoP
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("editor: parameter %q not found", op.OldName)
+		return nil, fmt.Errorf("codegate: parameter %q not found", op.OldName)
 	}
 	if fn.Body != nil {
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -765,10 +765,10 @@ func (c editCompiler) compileRenameGoParameter(ctx context.Context, op RenameGoP
 
 func (c editCompiler) compileAddGoStructField(ctx context.Context, op AddGoStructField) ([]FileEdit, error) {
 	if !isValidIdentifier(op.Name) {
-		return nil, fmt.Errorf("editor: invalid Go field name %q", op.Name)
+		return nil, fmt.Errorf("codegate: invalid Go field name %q", op.Name)
 	}
 	if strings.TrimSpace(op.Type) == "" {
-		return nil, errors.New("editor: AddGoStructField requires Type")
+		return nil, errors.New("codegate: AddGoStructField requires Type")
 	}
 	sym, pf, st, err := c.resolveStructType(ctx, op.Struct)
 	if err != nil {
@@ -780,7 +780,7 @@ func (c editCompiler) compileAddGoStructField(ctx context.Context, op AddGoStruc
 	for _, field := range st.Fields.List {
 		for _, name := range field.Names {
 			if name.Name == op.Name {
-				return nil, fmt.Errorf("editor: field %q already exists", op.Name)
+				return nil, fmt.Errorf("codegate: field %q already exists", op.Name)
 			}
 		}
 	}
@@ -799,7 +799,7 @@ func (c editCompiler) compileAddGoStructField(ctx context.Context, op AddGoStruc
 
 func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveGoStructField) ([]FileEdit, error) {
 	if op.Field == "" {
-		return nil, errors.New("editor: RemoveGoStructField requires Field")
+		return nil, errors.New("codegate: RemoveGoStructField requires Field")
 	}
 	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Struct))
 	if err != nil {
@@ -813,7 +813,7 @@ func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveG
 		return nil, err
 	}
 	if fieldNameAmbiguous(idx, sym, op.Field) && hasSelectorUse(ctx, c.snapshot, idx, sym.UnitID, op.Field) {
-		return nil, fmt.Errorf("editor: field %q selector ownership is ambiguous", op.Field)
+		return nil, fmt.Errorf("codegate: field %q selector ownership is ambiguous", op.Field)
 	}
 	var fieldSym Symbol
 	for _, child := range sym.Children {
@@ -823,11 +823,11 @@ func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveG
 		}
 	}
 	if fieldSym.ID == "" {
-		return nil, fmt.Errorf("editor: field %q not found", op.Field)
+		return nil, fmt.Errorf("codegate: field %q not found", op.Field)
 	}
 	for _, occ := range idx.occurrences {
 		if occ.SymbolID == fieldSym.ID && occ.Kind != OccurrenceDeclaration {
-			return nil, fmt.Errorf("editor: field %q has indexed references", op.Field)
+			return nil, fmt.Errorf("codegate: field %q has indexed references", op.Field)
 		}
 	}
 	for _, field := range st.Fields.List {
@@ -843,12 +843,12 @@ func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveG
 			}
 		}
 	}
-	return nil, fmt.Errorf("editor: field %q not found", op.Field)
+	return nil, fmt.Errorf("codegate: field %q not found", op.Field)
 }
 
 func (c editCompiler) compileRenameGoStructField(ctx context.Context, op RenameGoStructField) ([]FileEdit, error) {
 	if op.OldName == "" || !isValidIdentifier(op.NewName) {
-		return nil, errors.New("editor: RenameGoStructField requires valid OldName and NewName")
+		return nil, errors.New("codegate: RenameGoStructField requires valid OldName and NewName")
 	}
 	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Struct))
 	if err != nil {
@@ -862,10 +862,10 @@ func (c editCompiler) compileRenameGoStructField(ctx context.Context, op RenameG
 		return nil, err
 	}
 	if op.UpdateSelectors && fieldNameAmbiguous(idx, sym, op.OldName) {
-		return nil, fmt.Errorf("editor: field %q selector ownership is ambiguous", op.OldName)
+		return nil, fmt.Errorf("codegate: field %q selector ownership is ambiguous", op.OldName)
 	}
 	if structHasField(st, op.NewName) {
-		return nil, fmt.Errorf("editor: field %q already exists", op.NewName)
+		return nil, fmt.Errorf("codegate: field %q already exists", op.NewName)
 	}
 	fieldName, err := findStructFieldName(st, op.OldName)
 	if err != nil {
@@ -881,7 +881,7 @@ func (c editCompiler) compileRenameGoStructField(ctx context.Context, op RenameG
 
 func (c editCompiler) compileChangeGoParameterType(ctx context.Context, op ChangeGoParameterType) ([]FileEdit, error) {
 	if op.Name == "" || strings.TrimSpace(op.Type) == "" {
-		return nil, errors.New("editor: ChangeGoParameterType requires Name and Type")
+		return nil, errors.New("codegate: ChangeGoParameterType requires Name and Type")
 	}
 	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
@@ -902,7 +902,7 @@ func (c editCompiler) compileChangeGoParameterType(ctx context.Context, op Chang
 
 func (c editCompiler) compileChangeGoResultType(ctx context.Context, op ChangeGoResultType) ([]FileEdit, error) {
 	if strings.TrimSpace(op.Type) == "" {
-		return nil, errors.New("editor: ChangeGoResultType requires Type")
+		return nil, errors.New("codegate: ChangeGoResultType requires Type")
 	}
 	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
@@ -928,21 +928,21 @@ func (c editCompiler) compileChangeGoResultType(ctx context.Context, op ChangeGo
 
 func (c editCompiler) compileRenameGoReceiver(ctx context.Context, op RenameGoReceiver) ([]FileEdit, error) {
 	if !isValidIdentifier(op.NewName) {
-		return nil, fmt.Errorf("editor: invalid Go receiver name %q", op.NewName)
+		return nil, fmt.Errorf("codegate: invalid Go receiver name %q", op.NewName)
 	}
 	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
 	if err != nil {
 		return nil, err
 	}
 	if sym.Kind != SymbolMethod || fn.Recv == nil || len(fn.Recv.List) == 0 {
-		return nil, errors.New("editor: RenameGoReceiver requires a method target")
+		return nil, errors.New("codegate: RenameGoReceiver requires a method target")
 	}
 	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
 		return nil, err
 	}
 	recv := fn.Recv.List[0]
 	if len(recv.Names) != 1 {
-		return nil, errors.New("editor: method receiver must have exactly one name")
+		return nil, errors.New("codegate: method receiver must have exactly one name")
 	}
 	oldName := recv.Names[0].Name
 	if oldName == op.NewName {
@@ -964,7 +964,7 @@ func (c editCompiler) compileRenameGoReceiver(ctx context.Context, op RenameGoRe
 func (c editCompiler) compileAddGoInterfaceMethod(ctx context.Context, op AddGoInterfaceMethod) ([]FileEdit, error) {
 	method := strings.TrimSpace(op.Method)
 	if method == "" {
-		return nil, errors.New("editor: AddGoInterfaceMethod requires Method")
+		return nil, errors.New("codegate: AddGoInterfaceMethod requires Method")
 	}
 	sym, pf, iface, err := c.resolveInterfaceType(ctx, op.Interface)
 	if err != nil {
@@ -978,7 +978,7 @@ func (c editCompiler) compileAddGoInterfaceMethod(ctx context.Context, op AddGoI
 		return nil, err
 	}
 	if interfaceHasMethod(iface, name) {
-		return nil, fmt.Errorf("editor: interface method %q already exists", name)
+		return nil, fmt.Errorf("codegate: interface method %q already exists", name)
 	}
 	edit := insertStructFieldEdit(pf.fset, iface.Methods.Opening, iface.Methods.Closing, fieldRanges(pf.fset, iface.Methods), op.Position, method)
 	edit.Path = pf.path
@@ -987,7 +987,7 @@ func (c editCompiler) compileAddGoInterfaceMethod(ctx context.Context, op AddGoI
 
 func (c editCompiler) compileRemoveGoInterfaceMethod(ctx context.Context, op RemoveGoInterfaceMethod) ([]FileEdit, error) {
 	if op.Method == "" {
-		return nil, errors.New("editor: RemoveGoInterfaceMethod requires Method")
+		return nil, errors.New("codegate: RemoveGoInterfaceMethod requires Method")
 	}
 	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Interface))
 	if err != nil {
@@ -1008,11 +1008,11 @@ func (c editCompiler) compileRemoveGoInterfaceMethod(ctx context.Context, op Rem
 		}
 	}
 	if methodSym.ID == "" {
-		return nil, fmt.Errorf("editor: interface method %q not found", op.Method)
+		return nil, fmt.Errorf("codegate: interface method %q not found", op.Method)
 	}
 	for _, occ := range idx.occurrences {
 		if occ.SymbolID == methodSym.ID && occ.Kind != OccurrenceDeclaration {
-			return nil, fmt.Errorf("editor: interface method %q has indexed references", op.Method)
+			return nil, fmt.Errorf("codegate: interface method %q has indexed references", op.Method)
 		}
 	}
 	for _, method := range iface.Methods.List {
@@ -1023,7 +1023,7 @@ func (c editCompiler) compileRemoveGoInterfaceMethod(ctx context.Context, op Rem
 			}
 		}
 	}
-	return nil, fmt.Errorf("editor: interface method %q not found", op.Method)
+	return nil, fmt.Errorf("codegate: interface method %q not found", op.Method)
 }
 
 func (c editCompiler) compileExtractGoFunction(ctx context.Context, op ExtractGoFunction) ([]FileEdit, error) {
@@ -1037,14 +1037,14 @@ func (c editCompiler) compileExtractGoMethod(ctx context.Context, op ExtractGoMe
 func (c editCompiler) compileExtract(ctx context.Context, p string, r Range, receiver, name, params, results string, insertAfter SymbolSelector, replaceWithCall string) ([]FileEdit, error) {
 	p = core.CleanPath(p)
 	if p == "." || name == "" || !isValidIdentifier(name) {
-		return nil, errors.New("editor: extract requires Path and valid Name")
+		return nil, errors.New("codegate: extract requires Path and valid Name")
 	}
 	src, err := c.snapshot.ReadFile(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	if r.Start.Offset < 0 || r.End.Offset <= r.Start.Offset || r.End.Offset > len(src) {
-		return nil, errors.New("editor: invalid extraction range")
+		return nil, errors.New("codegate: invalid extraction range")
 	}
 	idx, err := buildIndex(ctx, c.snapshot, Scope{Path: p, Language: Go})
 	if err != nil {
@@ -1052,7 +1052,7 @@ func (c editCompiler) compileExtract(ctx context.Context, p string, r Range, rec
 	}
 	for _, sym := range idx.symbols {
 		if sym.Location.URI == p && sym.Name == name {
-			return nil, fmt.Errorf("editor: symbol %q already exists", name)
+			return nil, fmt.Errorf("codegate: symbol %q already exists", name)
 		}
 	}
 	insertOffset := len(src)
@@ -1068,7 +1068,7 @@ func (c editCompiler) compileExtract(ctx context.Context, p string, r Range, rec
 	}
 	body := strings.TrimSpace(string(src[r.Start.Offset:r.End.Offset]))
 	if body == "" {
-		return nil, errors.New("editor: extraction body is empty")
+		return nil, errors.New("codegate: extraction body is empty")
 	}
 	decl := formatExtractedDecl(receiver, name, params, results, body)
 	edits := []TextEdit{{Path: p, Range: Range{Start: Position{Offset: insertOffset}, End: Position{Offset: insertOffset}}, Replacement: "\n\n" + decl + "\n"}}
@@ -1098,9 +1098,9 @@ func moveDeclarationSource(sym Symbol, source string) string {
 
 func exactMatchErr(kind string, n int) error {
 	if n == 0 {
-		return fmt.Errorf("editor: %s not found", kind)
+		return fmt.Errorf("codegate: %s not found", kind)
 	}
-	return fmt.Errorf("editor: selector is ambiguous: %d %ss match", n, kind)
+	return fmt.Errorf("codegate: selector is ambiguous: %d %ss match", n, kind)
 }
 
 func exactSymbol(idx *index, sel SymbolSelector, kind string) (Symbol, error) {
@@ -1133,11 +1133,11 @@ func supportedDeclarationEdit(sym Symbol) error {
 	case SymbolFunction, SymbolMethod, SymbolType, SymbolStruct, SymbolInterface, SymbolConst, SymbolVar:
 		return nil
 	case SymbolField:
-		return errors.New("editor: operation does not support Go struct fields")
+		return errors.New("codegate: operation does not support Go struct fields")
 	case SymbolPackage:
-		return errors.New("editor: operation does not support Go packages")
+		return errors.New("codegate: operation does not support Go packages")
 	default:
-		return fmt.Errorf("editor: operation does not support Go %s symbols", sym.Kind)
+		return fmt.Errorf("codegate: operation does not support Go %s symbols", sym.Kind)
 	}
 }
 
@@ -1146,7 +1146,7 @@ func (c editCompiler) selectFile(ctx context.Context, filePath, unitID, label st
 		return core.CleanPath(filePath), nil
 	}
 	if unitID == "" {
-		return "", fmt.Errorf("editor: %s requires Path or UnitID", label)
+		return "", fmt.Errorf("codegate: %s requires Path or UnitID", label)
 	}
 	idx, err := buildIndex(ctx, c.snapshot, Scope{UnitID: unitID, Language: Go})
 	if err != nil {
@@ -1154,7 +1154,7 @@ func (c editCompiler) selectFile(ctx context.Context, filePath, unitID, label st
 	}
 	files := append([]string(nil), idx.unitFiles[unitID]...)
 	if len(files) == 0 {
-		return "", fmt.Errorf("editor: %s requires Path or valid UnitID", label)
+		return "", fmt.Errorf("codegate: %s requires Path or valid UnitID", label)
 	}
 	sort.Strings(files)
 	return files[0], nil
@@ -1177,7 +1177,7 @@ func (c editCompiler) resolveFunctionDecl(ctx context.Context, sel SymbolSelecto
 		return nil, Symbol{}, parsedFile{}, nil, err
 	}
 	if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod {
-		return nil, Symbol{}, parsedFile{}, nil, errors.New("editor: target must be a function or method")
+		return nil, Symbol{}, parsedFile{}, nil, errors.New("codegate: target must be a function or method")
 	}
 	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
@@ -1200,7 +1200,7 @@ func (c editCompiler) resolveFunctionDecl(ctx context.Context, sel SymbolSelecto
 			return idx, sym, pf, fn, nil
 		}
 	}
-	return nil, Symbol{}, parsedFile{}, nil, errors.New("editor: function declaration not found")
+	return nil, Symbol{}, parsedFile{}, nil, errors.New("codegate: function declaration not found")
 }
 
 func (c editCompiler) resolveStructType(ctx context.Context, sel SymbolSelector) (Symbol, parsedFile, *ast.StructType, error) {
@@ -1220,7 +1220,7 @@ func (c editCompiler) resolveStructTypeFromIndex(ctx context.Context, idx *index
 		return Symbol{}, parsedFile{}, nil, err
 	}
 	if sym.Kind != SymbolStruct {
-		return Symbol{}, parsedFile{}, nil, errors.New("editor: target must be a struct")
+		return Symbol{}, parsedFile{}, nil, errors.New("codegate: target must be a struct")
 	}
 	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
@@ -1242,12 +1242,12 @@ func (c editCompiler) resolveStructTypeFromIndex(ctx context.Context, idx *index
 			}
 			st, ok := ts.Type.(*ast.StructType)
 			if !ok {
-				return Symbol{}, parsedFile{}, nil, errors.New("editor: target is not a struct")
+				return Symbol{}, parsedFile{}, nil, errors.New("codegate: target is not a struct")
 			}
 			return sym, pf, st, nil
 		}
 	}
-	return Symbol{}, parsedFile{}, nil, errors.New("editor: struct declaration not found")
+	return Symbol{}, parsedFile{}, nil, errors.New("codegate: struct declaration not found")
 }
 
 func (c editCompiler) resolveInterfaceType(ctx context.Context, sel SymbolSelector) (Symbol, parsedFile, *ast.InterfaceType, error) {
@@ -1267,7 +1267,7 @@ func (c editCompiler) resolveInterfaceTypeFromIndex(ctx context.Context, idx *in
 		return Symbol{}, parsedFile{}, nil, err
 	}
 	if sym.Kind != SymbolInterface {
-		return Symbol{}, parsedFile{}, nil, errors.New("editor: target must be an interface")
+		return Symbol{}, parsedFile{}, nil, errors.New("codegate: target must be an interface")
 	}
 	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
@@ -1289,12 +1289,12 @@ func (c editCompiler) resolveInterfaceTypeFromIndex(ctx context.Context, idx *in
 			}
 			iface, ok := ts.Type.(*ast.InterfaceType)
 			if !ok {
-				return Symbol{}, parsedFile{}, nil, errors.New("editor: target is not an interface")
+				return Symbol{}, parsedFile{}, nil, errors.New("codegate: target is not an interface")
 			}
 			return sym, pf, iface, nil
 		}
 	}
-	return Symbol{}, parsedFile{}, nil, errors.New("editor: interface declaration not found")
+	return Symbol{}, parsedFile{}, nil, errors.New("codegate: interface declaration not found")
 }
 
 func structHasField(st *ast.StructType, fieldName string) bool {
@@ -1316,7 +1316,7 @@ func findStructFieldName(st *ast.StructType, fieldName string) (*ast.Ident, erro
 			}
 		}
 	}
-	return nil, fmt.Errorf("editor: field %q not found", fieldName)
+	return nil, fmt.Errorf("codegate: field %q not found", fieldName)
 }
 
 func interfaceHasMethod(iface *ast.InterfaceType, methodName string) bool {
@@ -1351,12 +1351,12 @@ func interfaceMethodName(method string) (string, error) {
 				continue
 			}
 			if len(iface.Methods.List[0].Names) != 1 {
-				return "", errors.New("editor: interface Method must declare exactly one named method")
+				return "", errors.New("codegate: interface Method must declare exactly one named method")
 			}
 			return iface.Methods.List[0].Names[0].Name, nil
 		}
 	}
-	return "", errors.New("editor: invalid interface method")
+	return "", errors.New("codegate: invalid interface method")
 }
 
 func paramRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
@@ -1463,7 +1463,7 @@ func removeGroupedNameReplacement(src []byte, r Range) string {
 
 func namedFieldTypeRange(fset *token.FileSet, fields *ast.FieldList, name, label string) (Range, error) {
 	if fields == nil {
-		return Range{}, fmt.Errorf("editor: %s %q not found", label, name)
+		return Range{}, fmt.Errorf("codegate: %s %q not found", label, name)
 	}
 	for _, field := range fields.List {
 		for _, candidate := range field.Names {
@@ -1471,20 +1471,20 @@ func namedFieldTypeRange(fset *token.FileSet, fields *ast.FieldList, name, label
 				continue
 			}
 			if len(field.Names) > 1 {
-				return Range{}, fmt.Errorf("editor: cannot change type for grouped %s %q", label, name)
+				return Range{}, fmt.Errorf("codegate: cannot change type for grouped %s %q", label, name)
 			}
 			if field.Type == nil {
-				return Range{}, fmt.Errorf("editor: %s %q has no type", label, name)
+				return Range{}, fmt.Errorf("codegate: %s %q has no type", label, name)
 			}
 			return rangeOf(fset, field.Type.Pos(), field.Type.End()), nil
 		}
 	}
-	return Range{}, fmt.Errorf("editor: %s %q not found", label, name)
+	return Range{}, fmt.Errorf("codegate: %s %q not found", label, name)
 }
 
 func resultTypeRange(fset *token.FileSet, fields *ast.FieldList, pos int) (Range, error) {
 	if fields == nil || pos < 0 {
-		return Range{}, fmt.Errorf("editor: result position %d not found", pos)
+		return Range{}, fmt.Errorf("codegate: result position %d not found", pos)
 	}
 	i := 0
 	for _, field := range fields.List {
@@ -1495,17 +1495,17 @@ func resultTypeRange(fset *token.FileSet, fields *ast.FieldList, pos int) (Range
 		for n := 0; n < count; n++ {
 			if i == pos {
 				if count > 1 {
-					return Range{}, fmt.Errorf("editor: cannot change type for grouped result at position %d", pos)
+					return Range{}, fmt.Errorf("codegate: cannot change type for grouped result at position %d", pos)
 				}
 				if field.Type == nil {
-					return Range{}, fmt.Errorf("editor: result at position %d has no type", pos)
+					return Range{}, fmt.Errorf("codegate: result at position %d has no type", pos)
 				}
 				return rangeOf(fset, field.Type.Pos(), field.Type.End()), nil
 			}
 			i++
 		}
 	}
-	return Range{}, fmt.Errorf("editor: result position %d not found", pos)
+	return Range{}, fmt.Errorf("codegate: result position %d not found", pos)
 }
 
 func (c editCompiler) structFieldUsageEdits(ctx context.Context, idx *index, sym Symbol, oldName, newName string, updateSelectors bool) ([]FileEdit, error) {
@@ -1609,11 +1609,11 @@ func hasSelectorUse(ctx context.Context, snapshot Snapshot, idx *index, unitID, 
 func validateAddParameterName(fn *ast.FuncDecl, name string) error {
 	for _, existing := range functionParameterNames(fn) {
 		if existing == name {
-			return fmt.Errorf("editor: parameter %q already exists", name)
+			return fmt.Errorf("codegate: parameter %q already exists", name)
 		}
 	}
 	if functionBodyDeclares(fn, name) {
-		return fmt.Errorf("editor: parameter %q would shadow a local declaration", name)
+		return fmt.Errorf("codegate: parameter %q would shadow a local declaration", name)
 	}
 	return nil
 }
@@ -1621,14 +1621,14 @@ func validateAddParameterName(fn *ast.FuncDecl, name string) error {
 func validateRenameParameterName(fn *ast.FuncDecl, oldName, newName string) error {
 	for _, existing := range functionParameterNames(fn) {
 		if existing == newName && existing != oldName {
-			return fmt.Errorf("editor: parameter %q already exists", newName)
+			return fmt.Errorf("codegate: parameter %q already exists", newName)
 		}
 	}
 	if functionBodyDeclares(fn, oldName) {
-		return fmt.Errorf("editor: parameter %q is shadowed in the function body", oldName)
+		return fmt.Errorf("codegate: parameter %q is shadowed in the function body", oldName)
 	}
 	if functionBodyDeclares(fn, newName) {
-		return fmt.Errorf("editor: parameter %q would shadow a local declaration", newName)
+		return fmt.Errorf("codegate: parameter %q would shadow a local declaration", newName)
 	}
 	return nil
 }
@@ -1693,7 +1693,7 @@ func functionBodyDeclares(fn *ast.FuncDecl, name string) bool {
 
 func (c editCompiler) ensureFunctionSignatureSafe(ctx context.Context, idx *index, target Symbol, fn *ast.FuncDecl, allowVariadic bool) error {
 	if !allowVariadic && functionIsVariadic(fn) {
-		return fmt.Errorf("editor: cannot update call sites for variadic function %q", target.Name)
+		return fmt.Errorf("codegate: cannot update call sites for variadic function %q", target.Name)
 	}
 	for _, occ := range idx.occurrences {
 		if occ.SymbolID != target.ID {
@@ -1701,11 +1701,11 @@ func (c editCompiler) ensureFunctionSignatureSafe(ctx context.Context, idx *inde
 		}
 		switch occ.Kind {
 		case OccurrenceRead, OccurrenceWrite, OccurrenceReference:
-			return fmt.Errorf("editor: cannot change signature for %q because it is used as a function value", target.Name)
+			return fmt.Errorf("codegate: cannot change signature for %q because it is used as a function value", target.Name)
 		}
 	}
 	if target.Kind == SymbolMethod && methodNameAmbiguous(idx, target) {
-		return fmt.Errorf("editor: method %q selector resolution is ambiguous", target.Name)
+		return fmt.Errorf("codegate: method %q selector resolution is ambiguous", target.Name)
 	}
 	for _, file := range idx.unitFiles[target.UnitID] {
 		src, err := c.snapshot.ReadFile(ctx, file)
@@ -1727,15 +1727,15 @@ func (c editCompiler) ensureFunctionSignatureSafe(ctx context.Context, idx *inde
 			}
 			callee := callTarget(idx, target.UnitID, call.Fun)
 			if callee.ID == "" {
-				guardErr = fmt.Errorf("editor: cannot change signature for %q because a call site is unresolved", target.Name)
+				guardErr = fmt.Errorf("codegate: cannot change signature for %q because a call site is unresolved", target.Name)
 				return false
 			}
 			if target.Kind == SymbolMethod && callee.ID != target.ID {
-				guardErr = fmt.Errorf("editor: cannot change signature for %q because selector call sites are ambiguous", target.Name)
+				guardErr = fmt.Errorf("codegate: cannot change signature for %q because selector call sites are ambiguous", target.Name)
 				return false
 			}
 			if callee.ID == target.ID && call.Ellipsis.IsValid() {
-				guardErr = fmt.Errorf("editor: cannot change signature for %q because a call site uses variadic expansion", target.Name)
+				guardErr = fmt.Errorf("codegate: cannot change signature for %q because a call site uses variadic expansion", target.Name)
 				return false
 			}
 			return true
@@ -1818,7 +1818,7 @@ func (c editCompiler) callArgumentEdits(ctx context.Context, idx *index, target 
 	for p, edits := range byPath {
 		for _, edit := range edits {
 			if edit.Range.Start.Offset < 0 {
-				return nil, errors.New("editor: call site has too few arguments")
+				return nil, errors.New("codegate: call site has too few arguments")
 			}
 		}
 		out = append(out, FileEdit{Path: p, Edits: edits})
@@ -2051,7 +2051,7 @@ func ensureImportsEdit(pf parsedFile, imports []importNeed) (TextEdit, error) {
 		specs = append(specs, formatImportSpec(imp.path, imp.alias))
 	}
 	if len(specs) == 0 {
-		return TextEdit{}, errors.New("editor: no imports to ensure")
+		return TextEdit{}, errors.New("codegate: no imports to ensure")
 	}
 	decls := importDecls(pf)
 	if len(decls) == 0 {
@@ -2076,7 +2076,7 @@ func ensureImportsEdit(pf parsedFile, imports []importNeed) (TextEdit, error) {
 		}, nil
 	}
 	if len(gen.Specs) != 1 {
-		return TextEdit{}, errors.New("editor: malformed import declaration")
+		return TextEdit{}, errors.New("codegate: malformed import declaration")
 	}
 	existing := strings.TrimSpace(sourceSlice(pf.src, pf.fset, gen.Specs[0].Pos(), gen.Specs[0].End()))
 	replacement := "import (\n\t" + existing + "\n\t" + strings.Join(specs, "\n\t") + "\n)"
@@ -2151,7 +2151,7 @@ func validateImportAlias(alias string) error {
 		return nil
 	}
 	if !isValidIdentifier(alias) {
-		return fmt.Errorf("editor: invalid Go import alias %q", alias)
+		return fmt.Errorf("codegate: invalid Go import alias %q", alias)
 	}
 	return nil
 }
@@ -2185,7 +2185,7 @@ func docRangeForSymbol(pf parsedFile, sym Symbol) (int, int, error) {
 			}
 		}
 	}
-	return 0, 0, errors.New("editor: declaration not found for comment replacement")
+	return 0, 0, errors.New("codegate: declaration not found for comment replacement")
 }
 
 func formatDocComment(name, text string) string {
@@ -2213,7 +2213,7 @@ func findStructField(pf parsedFile, structName, fieldName string) (*ast.Field, e
 			}
 			st, ok := ts.Type.(*ast.StructType)
 			if !ok {
-				return nil, errors.New("editor: target is not a struct")
+				return nil, errors.New("codegate: target is not a struct")
 			}
 			for _, field := range st.Fields.List {
 				for _, name := range field.Names {
@@ -2224,7 +2224,7 @@ func findStructField(pf parsedFile, structName, fieldName string) (*ast.Field, e
 			}
 		}
 	}
-	return nil, errors.New("editor: struct field not found")
+	return nil, errors.New("codegate: struct field not found")
 }
 
 func tagEditOffsets(pf parsedFile, field *ast.Field) (int, int) {

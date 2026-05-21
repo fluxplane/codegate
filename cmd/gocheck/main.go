@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/editor"
-	"github.com/codewandler/editor/internal/lang/goast"
+	"github.com/codewandler/codegate"
+	"github.com/codewandler/codegate/internal/lang/goast"
 )
 
 func main() {
@@ -27,17 +27,17 @@ func main() {
 
 func run(ctx context.Context, root string, includeTests bool, maxProposals int) error {
 	source := dirSource{fsys: os.DirFS(root)}
-	ed, err := editor.New(".", editor.WithSource(source), editor.WithLanguage(editor.Go))
+	ed, err := codegate.NewEditor(".", codegate.WithSource(source), codegate.WithLanguage(codegate.Go))
 	if err != nil {
 		return err
 	}
-	scope := editor.Scope{IncludeTests: includeTests}
+	scope := codegate.Scope{IncludeTests: includeTests}
 
 	packages, err := ed.Packages(ctx, scope)
 	if err != nil {
 		return err
 	}
-	symbols, err := ed.FindSymbols(ctx, editor.SymbolSelector{Language: editor.Go, IncludeTests: &includeTests})
+	symbols, err := ed.FindSymbols(ctx, codegate.SymbolSelector{Language: codegate.Go, IncludeTests: &includeTests})
 	if err != nil {
 		return err
 	}
@@ -49,11 +49,11 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	if err != nil {
 		return err
 	}
-	validation, err := ed.Validate(ctx, editor.ValidationOptions{Scope: scope, Kinds: []editor.ValidationKind{editor.ValidationParse, editor.ValidationTypecheck}})
+	validation, err := ed.Validate(ctx, codegate.ValidationOptions{Scope: scope, Kinds: []codegate.ValidationKind{codegate.ValidationParse, codegate.ValidationTypecheck}})
 	if err != nil {
 		return err
 	}
-	proposals, err := ed.SuggestRefactorings(ctx, editor.WithSuggestScope(scope))
+	proposals, err := ed.SuggestRefactorings(ctx, codegate.WithSuggestScope(scope))
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ type dirSource struct {
 	fsys fs.FS
 }
 
-func (s dirSource) ListFiles(ctx context.Context, scope editor.Scope) ([]string, error) {
+func (s dirSource) ListFiles(ctx context.Context, scope codegate.Scope) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -153,8 +153,8 @@ func countGoFiles(fsys fs.FS, includeTests bool) (int, error) {
 	return n, err
 }
 
-func printTopMetrics(units []editor.UnitMetrics, limit int) {
-	units = append([]editor.UnitMetrics(nil), units...)
+func printTopMetrics(units []codegate.UnitMetrics, limit int) {
+	units = append([]codegate.UnitMetrics(nil), units...)
 	sort.Slice(units, func(i, j int) bool {
 		if units[i].PressureScore == units[j].PressureScore {
 			return units[i].UnitID < units[j].UnitID
@@ -184,7 +184,7 @@ func printTopMetrics(units []editor.UnitMetrics, limit int) {
 	}
 }
 
-func printValidationDiagnostics(diagnostics []editor.Diagnostic, limit int) {
+func printValidationDiagnostics(diagnostics []codegate.Diagnostic, limit int) {
 	if len(diagnostics) == 0 {
 		return
 	}
@@ -200,7 +200,7 @@ func printValidationDiagnostics(diagnostics []editor.Diagnostic, limit int) {
 	}
 }
 
-func printProposals(proposals []editor.Proposal, limit int) {
+func printProposals(proposals []codegate.Proposal, limit int) {
 	if limit < 0 || limit > len(proposals) {
 		limit = len(proposals)
 	}
@@ -220,23 +220,23 @@ func printProposals(proposals []editor.Proposal, limit int) {
 	}
 }
 
-func occurrenceCounts(occurrences []editor.Occurrence) map[editor.OccurrenceKind]int {
-	counts := map[editor.OccurrenceKind]int{}
+func occurrenceCounts(occurrences []codegate.Occurrence) map[codegate.OccurrenceKind]int {
+	counts := map[codegate.OccurrenceKind]int{}
 	for _, occ := range occurrences {
 		counts[occ.Kind]++
 	}
 	return counts
 }
 
-func formatOccurrenceCounts(counts map[editor.OccurrenceKind]int) string {
-	order := []editor.OccurrenceKind{
-		editor.OccurrenceDeclaration,
-		editor.OccurrenceRead,
-		editor.OccurrenceWrite,
-		editor.OccurrenceCall,
-		editor.OccurrenceImport,
-		editor.OccurrenceDoc,
-		editor.OccurrenceReference,
+func formatOccurrenceCounts(counts map[codegate.OccurrenceKind]int) string {
+	order := []codegate.OccurrenceKind{
+		codegate.OccurrenceDeclaration,
+		codegate.OccurrenceRead,
+		codegate.OccurrenceWrite,
+		codegate.OccurrenceCall,
+		codegate.OccurrenceImport,
+		codegate.OccurrenceDoc,
+		codegate.OccurrenceReference,
 	}
 	parts := make([]string, 0, len(order))
 	for _, kind := range order {

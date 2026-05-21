@@ -224,7 +224,7 @@ func sourceHash(ctx context.Context, snapshot Snapshot, sym Symbol) (string, err
 	}
 	start, end := sym.Location.Range.Start.Offset, sym.Location.Range.End.Offset
 	if start < 0 || end > len(src) || start > end {
-		return "", fmt.Errorf("editor: invalid symbol range for %s", sym.QualifiedName)
+		return "", fmt.Errorf("codegate: invalid symbol range for %s", sym.QualifiedName)
 	}
 	return hashBytes(src[start:end]), nil
 }

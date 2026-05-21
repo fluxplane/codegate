@@ -1,4 +1,4 @@
-package editor
+package codegate
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/codegate/internal/core"
 )
 
 type ChangeSet struct {
@@ -20,7 +20,7 @@ type ChangeSet struct {
 
 func (c *ChangeSet) Apply(ctx context.Context, ops ...Operation) error {
 	if c.closed {
-		return errors.New("editor: changeset is closed")
+		return errors.New("codegate: changeset is closed")
 	}
 	for _, op := range ops {
 		if ctx.Err() != nil {
@@ -43,14 +43,14 @@ func (c *ChangeSet) Apply(ctx context.Context, ops ...Operation) error {
 
 func (c *ChangeSet) Read(ctx context.Context, sel SymbolSelector) (SourceFragment, error) {
 	if c.closed {
-		return SourceFragment{}, errors.New("editor: changeset is closed")
+		return SourceFragment{}, errors.New("codegate: changeset is closed")
 	}
 	return c.editor.readSymbol(ctx, sel, c.overlay)
 }
 
 func (c *ChangeSet) Validate(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
 	if c.closed {
-		return ValidationResult{}, errors.New("editor: changeset is closed")
+		return ValidationResult{}, errors.New("codegate: changeset is closed")
 	}
 	return c.editor.validate(ctx, opts, c.overlay)
 }
@@ -99,7 +99,7 @@ func (c *ChangeSet) Commit(ctx context.Context) error {
 		return ctx.Err()
 	}
 	if c.closed {
-		return errors.New("editor: changeset is closed")
+		return errors.New("codegate: changeset is closed")
 	}
 	c.editor.mu.Lock()
 	defer c.editor.mu.Unlock()
@@ -131,7 +131,7 @@ func (c *ChangeSet) applyFileEdits(ctx context.Context, fileEdits []FileEdit) er
 		if backend, ok := c.editor.backendForPath(p); ok {
 			formatted, err := backend.Format(ctx, p, next)
 			if err != nil {
-				return fmt.Errorf("editor: format %s: %w", p, err)
+				return fmt.Errorf("codegate: format %s: %w", p, err)
 			}
 			next = formatted
 		}
@@ -156,10 +156,10 @@ func applyTextEdits(src []byte, edits []TextEdit) ([]byte, error) {
 	for _, edit := range edits {
 		start, end := edit.Range.Start.Offset, edit.Range.End.Offset
 		if start < 0 || end < start || end > len(src) {
-			return nil, fmt.Errorf("editor: invalid text edit range %d..%d for %d byte file", start, end, len(src))
+			return nil, fmt.Errorf("codegate: invalid text edit range %d..%d for %d byte file", start, end, len(src))
 		}
 		if start < prevEnd {
-			return nil, errors.New("editor: overlapping text edits")
+			return nil, errors.New("codegate: overlapping text edits")
 		}
 		prevEnd = end
 	}

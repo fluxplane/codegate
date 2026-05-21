@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/editor"
+	"github.com/codewandler/codegate"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 type ReadFileFunc func(ctx context.Context, filePath string, maxBytes int64) ([]byte, bool, error)
 
 // ListFilesFunc lists workspace-relative files for an editor scope.
-type ListFilesFunc func(ctx context.Context, scope editor.Scope) ([]string, error)
+type ListFilesFunc func(ctx context.Context, scope codegate.Scope) ([]string, error)
 
 // WalkFunc adapts agentruntime Workspace.Walk by returning only the fields the
 // editor needs.
@@ -114,7 +114,7 @@ func WithSkipDirs(skipDirs ...string) Option {
 	}
 }
 
-func (s *Source) ListFiles(ctx context.Context, scope editor.Scope) ([]string, error) {
+func (s *Source) ListFiles(ctx context.Context, scope codegate.Scope) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -140,7 +140,7 @@ func (s *Source) ReadFile(ctx context.Context, filePath string) ([]byte, error) 
 }
 
 func (s *Source) walkListFiles(walk WalkFunc) ListFilesFunc {
-	return func(ctx context.Context, scope editor.Scope) ([]string, error) {
+	return func(ctx context.Context, scope codegate.Scope) ([]string, error) {
 		root := cleanPath(firstNonEmpty(scope.Path, scope.Root, "."))
 		entries, truncated, err := walk(ctx, root, WalkOptions{
 			Depth:      s.walkDepth,
@@ -169,7 +169,7 @@ func (s *Source) walkListFiles(walk WalkFunc) ListFilesFunc {
 	}
 }
 
-func nilList(context.Context, editor.Scope) ([]string, error) {
+func nilList(context.Context, codegate.Scope) ([]string, error) {
 	return nil, errors.New("agentruntime adapter: nil list function")
 }
 

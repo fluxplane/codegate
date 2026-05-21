@@ -1,4 +1,4 @@
-module github.com/codewandler/editor
+module github.com/codewandler/codegate
 
 go 1.24
 
