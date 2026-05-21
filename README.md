@@ -5,7 +5,7 @@
 It is built for bots first, but the API is plain Go:
 
 ```text
-github.com/codewandler/codegate
+github.com/fluxplane/codegate
 ```
 
 ## Why Use It
@@ -42,8 +42,8 @@ import (
 	"fmt"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/language/golang"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/language/golang"
 )
 
 func main() {

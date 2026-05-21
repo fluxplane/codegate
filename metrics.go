@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 func computeMetrics(idx *core.Index) []UnitMetrics {

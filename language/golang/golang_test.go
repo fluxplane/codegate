@@ -3,7 +3,7 @@ package golang
 import (
 	"testing"
 
-	"github.com/codewandler/codegate"
+	"github.com/fluxplane/codegate"
 )
 
 func TestNewReturnsGoBackend(t *testing.T) {

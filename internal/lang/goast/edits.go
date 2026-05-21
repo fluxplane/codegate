@@ -16,7 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )

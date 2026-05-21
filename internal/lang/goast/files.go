@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 func goFiles(ctx context.Context, snapshot Snapshot, scope Scope) ([]string, error) {

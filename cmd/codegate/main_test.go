@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/codewandler/codegate"
+	"github.com/fluxplane/codegate"
 )
 
 func TestCodegateAssessCommand(t *testing.T) {

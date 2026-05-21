@@ -10,8 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate/internal/core"
-	"github.com/codewandler/codegate/internal/lang/goast"
+	"github.com/fluxplane/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/lang/goast"
 )
 
 func newTestEditor(t *testing.T, files map[string]string) *Editor {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/language/golang"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/language/golang"
 )
 
 func TestEngineValidationAdapterRunsOnlyWhenNamed(t *testing.T) {

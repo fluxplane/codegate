@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/adapter/agentruntime"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/adapter/agentruntime"
 )
 
 func TestWalkSourceIntegratesWithEditor(t *testing.T) {

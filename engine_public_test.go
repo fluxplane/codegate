@@ -5,9 +5,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/language/golang"
-	"github.com/codewandler/codegate/language/markdown"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/language/golang"
+	"github.com/fluxplane/codegate/language/markdown"
 )
 
 func TestPublicEngineBuilderRegistersLanguagePackages(t *testing.T) {

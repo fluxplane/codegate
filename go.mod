@@ -1,4 +1,4 @@
-module github.com/codewandler/codegate
+module github.com/fluxplane/codegate
 
 go 1.24
 

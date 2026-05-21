@@ -1,8 +1,8 @@
 package golang
 
 import (
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/internal/lang/goast"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/internal/lang/goast"
 )
 
 // Config controls the Go backend. It is intentionally empty for the initial

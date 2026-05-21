@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 type architecturePolicyAssessment struct {

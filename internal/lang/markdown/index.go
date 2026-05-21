@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 	"github.com/yuin/goldmark"
 	goldast "github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"

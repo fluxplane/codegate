@@ -2,7 +2,7 @@
 
 ## v0.1.0 - 2026-05-21
 
-First public release of `github.com/codewandler/codegate`.
+First public release of `github.com/fluxplane/codegate`.
 
 ### Added
 

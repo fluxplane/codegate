@@ -3,7 +3,7 @@ package markdown
 import (
 	"testing"
 
-	"github.com/codewandler/codegate"
+	"github.com/fluxplane/codegate"
 )
 
 func TestNewReturnsMarkdownBackend(t *testing.T) {

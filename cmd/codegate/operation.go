@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/codewandler/codegate"
+	"github.com/fluxplane/codegate"
 	"github.com/spf13/cobra"
 )
 

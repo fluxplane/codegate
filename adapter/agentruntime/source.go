@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate"
+	"github.com/fluxplane/codegate"
 )
 
 const (

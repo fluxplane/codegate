@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate/internal/lang/goast"
-	internalmarkdown "github.com/codewandler/codegate/internal/lang/markdown"
+	"github.com/fluxplane/codegate/internal/lang/goast"
+	internalmarkdown "github.com/fluxplane/codegate/internal/lang/markdown"
 )
 
 func TestEngineLookupAssessValidate(t *testing.T) {

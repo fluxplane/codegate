@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/codewandler/codegate/internal/core"
-	"github.com/codewandler/codegate/internal/lang/goast"
-	"github.com/codewandler/codegate/internal/lang/markdown"
+	"github.com/fluxplane/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/lang/goast"
+	"github.com/fluxplane/codegate/internal/lang/markdown"
 )
 
 // Option configures the lower-level Editor API.

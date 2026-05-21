@@ -1,6 +1,6 @@
 package codegate
 
-import "github.com/codewandler/codegate/internal/core"
+import "github.com/fluxplane/codegate/internal/core"
 
 type (
 	Operation                 = core.Operation

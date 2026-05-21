@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 func (b GoBackend) Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error) {

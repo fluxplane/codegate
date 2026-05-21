@@ -18,9 +18,9 @@ func TestExternalConsumerModuleUsesOnlyPublicPackages(t *testing.T) {
 
 go 1.24
 
-require github.com/codewandler/codegate v0.0.0
+require github.com/fluxplane/codegate v0.0.0
 
-replace github.com/codewandler/codegate => `+filepath.ToSlash(repoRoot)+`
+replace github.com/fluxplane/codegate => `+filepath.ToSlash(repoRoot)+`
 `)
 	writeReleaseTestFile(t, dir, "main.go", `package main
 
@@ -29,10 +29,10 @@ import (
 	"fmt"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/adapter/agentruntime"
-	"github.com/codewandler/codegate/language/golang"
-	"github.com/codewandler/codegate/language/markdown"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/adapter/agentruntime"
+	"github.com/fluxplane/codegate/language/golang"
+	"github.com/fluxplane/codegate/language/markdown"
 )
 
 func main() {
@@ -118,7 +118,7 @@ func TestPublicDocsDoNotImportInternalPackages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(data), "github.com/codewandler/codegate/internal") || strings.Contains(string(data), "internal/") {
+		if strings.Contains(string(data), "github.com/fluxplane/codegate/internal") || strings.Contains(string(data), "internal/") {
 			t.Fatalf("%s references internal packages in public documentation", path)
 		}
 	}

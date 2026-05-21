@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate"
-	"github.com/codewandler/codegate/internal/lang/goast"
+	"github.com/fluxplane/codegate"
+	"github.com/fluxplane/codegate/internal/lang/goast"
 )
 
 func main() {

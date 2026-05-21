@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing/fstest"
 
-	"github.com/codewandler/codegate"
-	agentruntimeadapter "github.com/codewandler/codegate/adapter/agentruntime"
-	"github.com/codewandler/codegate/language/golang"
-	"github.com/codewandler/codegate/language/markdown"
+	"github.com/fluxplane/codegate"
+	agentruntimeadapter "github.com/fluxplane/codegate/adapter/agentruntime"
+	"github.com/fluxplane/codegate/language/golang"
+	"github.com/fluxplane/codegate/language/markdown"
 )
 
 func ExampleNew() {

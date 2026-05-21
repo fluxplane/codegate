@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 func (e *Editor) resolvePositionTarget(idx *core.Index, filePath string, offset int, fallbackEnclosing bool) (NavigationTarget, []Symbol, []Diagnostic) {

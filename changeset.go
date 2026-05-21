@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/codewandler/codegate/internal/core"
+	"github.com/fluxplane/codegate/internal/core"
 )
 
 // ChangeSet holds in-memory edits until callers inspect, validate, commit, or
