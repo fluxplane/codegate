@@ -154,7 +154,7 @@ The same policy can be passed to the CLI as JSON:
 }
 ```
 
-See [`examples/agentruntime-architecture.rules.json`](examples/agentruntime-architecture.rules.json) for a larger policy modeled after a layered agent runtime. It is an example of consumer-defined layer names and rules, not a built-in codegate architecture.
+See [`examples/README.md`](examples/README.md) and [`examples/agentruntime-architecture.rules.json`](examples/agentruntime-architecture.rules.json) for a larger policy modeled after a layered agent runtime. It is an example of consumer-defined layer names and rules, not a built-in codegate architecture.
 
 ## Markdown Support
 
@@ -193,6 +193,10 @@ go run ./cmd/codegate --root . --language markdown cycle --apply-first
 Use `assess --summary-only` when an agent needs scores, compact metrics, and finding counts without full evidence payloads.
 
 Use `cycle --apply-first` only when you want the first executable suggestion applied to an in-memory change set and returned as a diff.
+
+## Agent Loop Examples
+
+Compile-tested examples in [`example_test.go`](example_test.go) cover the public engine builder, a Go lookup-assess-suggest-apply-validate-diff loop, Markdown structural cleanup, the direct `Editor` compatibility API, and the `adapter/agentruntime` source bridge.
 
 ## Direct Edit API
 

@@ -9,6 +9,7 @@ go run ./cmd/codegate --root . --language go capabilities
 go run ./cmd/codegate --root . --language markdown assess --gate all
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
 go run ./cmd/codegate --root . --language go assess --gate all --summary-only
+go run ./cmd/codegate --root . --language go assess --gate architecture --rules examples/agentruntime-architecture.rules.json --summary-only
 ```
 
 The normal test suite includes an external consumer test. It creates a temporary
@@ -17,6 +18,10 @@ Markdown fixtures.
 
 Use `assess --summary-only` in agent loops that need scores, compact metrics, and
 finding counts without full evidence payloads.
+
+Before tagging, skim `README.md`, `examples/README.md`, and the public examples
+in `example_test.go`. They are the public API smoke test for the engine builder,
+language packages, Markdown cleanup, and agentruntime source adapter.
 
 Tag placeholder:
 
