@@ -52,7 +52,11 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 			executable++
 		}
 	}
-	scores := goAssessmentScores(validation.Passed, findings, violations, proposals, pressure, opts)
+	var topUnit UnitMetrics
+	if len(units) > 0 {
+		topUnit = units[0]
+	}
+	scores := goAssessmentScores(validation.Passed, findings, violations, proposals, pressure, opts, idx.quality.metrics, topUnit)
 	return AssessmentReport{
 		Language: string(Go),
 		Summary: AssessmentSummary{
@@ -85,7 +89,7 @@ func (b GoBackend) Assess(ctx context.Context, snapshot Snapshot, scope Scope, o
 
 func goAssessmentMetrics(idx *index, opts AssessmentOptions) map[string]interface{} {
 	metrics := map[string]interface{}{
-		"score_model":        "go-architecture-v0",
+		"score_model":        "go-architecture-v1",
 		"gates":              normalizedAssessmentGates(opts.Gates),
 		"debt_marker_count":  len(idx.debtMarkers),
 		"debt_marker_counts": core.CountDebtMarkers(idx.debtMarkers),
@@ -315,7 +319,7 @@ func architectureImportViolation(kind string, imp ImportEdge, rule ArchitectureI
 	}
 }
 
-func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions []Proposal, pressure float64, opts AssessmentOptions) ScoreSet {
+func goAssessmentScores(validationPassed bool, findings []Finding, violations []Violation, suggestions []Proposal, pressure float64, opts AssessmentOptions, metrics goQualityMetrics, topUnit UnitMetrics) ScoreSet {
 	boundary := 100
 	testBoundary := 100
 	if opts.Architecture != nil {
@@ -324,31 +328,32 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 		boundary = 100 - minAssessmentInt(100, boundaryViolations*25)
 		testBoundary = 100 - minAssessmentInt(100, testViolations*10)
 	}
-	coupling := 100 - minAssessmentInt(35, countFindings(findings, "architecture_high_fan_out")*5)
+	coupling := 100 - goCouplingPenalty(countFindings(findings, "architecture_high_fan_out"), metrics)
 	if opts.Architecture != nil {
 		if opts.Architecture.Coupling.FanOutThreshold > 0 {
-			coupling = 100 - minAssessmentInt(40, countUnallowedFindings(findings, "architecture_fan_out")*2)
+			coupling = 100 - goArchitectureFanOutPenalty(countUnallowedFindings(findings, "architecture_fan_out"), metrics)
 		}
 	}
 	sideEffect := 100
 	coverage := 100 - minAssessmentInt(50, countFindings(findings, "coverage_")*25)
 	if opts.Architecture != nil {
-		sideEffect = 100 - minAssessmentInt(60, countArchitectureEffectViolations(violations, opts.Architecture)*10)
-		coverage = minAssessmentInt(coverage, 100-minAssessmentInt(100, countViolations(violations, "architecture_unknown_package")*20))
+		sideEffect = 100 - goArchitectureEffectPenalty(countArchitectureEffectViolations(violations, opts.Architecture), metrics)
+		coverage = minAssessmentInt(coverage, 100-goUnknownPackagePenalty(countViolations(violations, "architecture_unknown_package"), metrics))
 	}
 	debtMarkers := countFindings(findings, "maintainability_debt_marker")
-	qualityFindings := countFindings(findings, "quality_") + countFindings(findings, "performance_")
-	safetyFindings := countFindings(findings, "safety_") + countFindings(findings, "security_")
-	maintainability := 100 - minAssessmentInt(25, actionableSuggestionPressure(suggestions)*5) - minAssessmentInt(20, int(pressure/100)) - minAssessmentInt(20, debtMarkers*2) - minAssessmentInt(25, qualityFindings*3)
+	maintainability := weightedAssessmentScore([]assessmentScoreComponent{
+		{score: 100 - goSuggestionPenalty(suggestions, metrics), weight: 1},
+		{score: 100 - goPressurePenalty(topUnit, pressure, metrics), weight: 1},
+		{score: 100 - goDebtPenalty(debtMarkers, metrics), weight: 1},
+		{score: 100 - goQualityPenalty(findings, metrics), weight: 2},
+	})
 	if maintainability < 50 {
 		maintainability = 50
 	}
 	if assessmentGateEnabled(opts, AssessmentGateSafety) && !validationPassed {
 		sideEffect = minAssessmentInt(sideEffect, 50)
 	}
-	if safetyFindings > 0 {
-		sideEffect = minAssessmentInt(sideEffect, 100-minAssessmentInt(40, safetyFindings*5))
-	}
+	sideEffect = minAssessmentInt(sideEffect, 100-goSafetyPenalty(findings, metrics))
 	overall := minAssessmentInt(boundary, maintainability)
 	overall = minAssessmentInt(overall, coverage)
 	overall = minAssessmentInt(overall, coupling)
@@ -359,7 +364,7 @@ func goAssessmentScores(validationPassed bool, findings []Finding, violations []
 	} else if opts.Architecture != nil && boundary < 100 && assessmentOnlyArchitecture(opts) {
 		overall = boundary
 	} else {
-		overall -= minAssessmentInt(30, len(violations)*10)
+		overall -= goViolationPenalty(violations, metrics)
 	}
 	if overall < 0 {
 		overall = 0
@@ -384,6 +389,145 @@ func actionableSuggestionPressure(suggestions []Proposal) int {
 		}
 	}
 	return n
+}
+
+func goCouplingPenalty(highFanOutFindings int, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(35, highFanOutFindings, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 2)
+}
+
+func goArchitectureFanOutPenalty(unallowedFanOutFindings int, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(40, unallowedFanOutFindings, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 2)
+}
+
+func goArchitectureEffectPenalty(effectViolations int, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(60, effectViolations, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 300)
+}
+
+func goUnknownPackagePenalty(unknownPackages int, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(100, unknownPackages, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 250)
+}
+
+func goSuggestionPenalty(suggestions []Proposal, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(25, actionableSuggestionPressure(suggestions), maxAssessmentInt(metrics.TotalFunctionCount, 1), 20)
+}
+
+func goPressurePenalty(topUnit UnitMetrics, pressure float64, metrics goQualityMetrics) int {
+	opportunities := topUnit.LOC
+	if opportunities <= 0 {
+		opportunities = metrics.TotalNonCommentLOC
+	}
+	return normalizedRatePenalty(20, int(pressure), maxAssessmentInt(opportunities, 1), 1000)
+}
+
+func goDebtPenalty(markers int, metrics goQualityMetrics) int {
+	return normalizedRatePenalty(20, markers, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 2)
+}
+
+func goQualityPenalty(findings []Finding, metrics goQualityMetrics) int {
+	weightedFindings := weightedFindingUnits(findings, "quality_", "performance_")
+	return normalizedWeightedRatePenalty(25, weightedFindings, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 50, findingWarningWeight)
+}
+
+func goSafetyPenalty(findings []Finding, metrics goQualityMetrics) int {
+	weightedFindings := weightedFindingUnits(findings, "safety_", "security_")
+	return normalizedWeightedRatePenalty(40, weightedFindings, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 5, findingWarningWeight)
+}
+
+func goViolationPenalty(violations []Violation, metrics goQualityMetrics) int {
+	weightedViolations := weightedViolationUnits(violations)
+	return normalizedWeightedRatePenalty(30, weightedViolations, maxAssessmentInt(metrics.TotalNonCommentLOC, 1), 2, findingErrorWeight)
+}
+
+func normalizedRatePenalty(cap, events, opportunities, scalePerKLOC int) int {
+	return normalizedWeightedRatePenalty(cap, events, opportunities, scalePerKLOC, 1)
+}
+
+func normalizedWeightedRatePenalty(cap, eventUnits, opportunities, scalePerKLOC, unitScale int) int {
+	if cap <= 0 || eventUnits <= 0 {
+		return 0
+	}
+	if opportunities <= 0 || scalePerKLOC <= 0 || unitScale <= 0 {
+		return minAssessmentInt(cap, eventUnits)
+	}
+	eventRate := eventUnits * 1000
+	scale := scalePerKLOC * unitScale * opportunities
+	return ceilAssessmentDiv(cap*eventRate, eventRate+scale)
+}
+
+type assessmentScoreComponent struct {
+	score  int
+	weight int
+}
+
+func weightedAssessmentScore(components []assessmentScoreComponent) int {
+	total := 0
+	weight := 0
+	for _, component := range components {
+		if component.weight <= 0 {
+			continue
+		}
+		total += clampAssessmentScore(component.score) * component.weight
+		weight += component.weight
+	}
+	if weight == 0 {
+		return 100
+	}
+	return (total + weight/2) / weight
+}
+
+func clampAssessmentScore(score int) int {
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
+}
+
+const (
+	findingInfoWeight    = 1
+	findingWarningWeight = 4
+	findingErrorWeight   = 8
+)
+
+func weightedFindingUnits(findings []Finding, prefixes ...string) int {
+	total := 0
+	for _, finding := range findings {
+		if !findingHasAnyPrefix(finding, prefixes) {
+			continue
+		}
+		total += findingSeverityWeight(finding.Severity)
+	}
+	return total
+}
+
+func findingHasAnyPrefix(finding Finding, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(finding.Kind, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func findingSeverityWeight(severity string) int {
+	switch severity {
+	case "info":
+		return findingInfoWeight
+	case "error":
+		return findingErrorWeight
+	default:
+		return findingWarningWeight
+	}
+}
+
+func weightedViolationUnits(violations []Violation) int {
+	total := 0
+	for _, violation := range violations {
+		total += findingSeverityWeight(violation.Severity)
+	}
+	return total
 }
 
 func summarizeGoAssessmentSuggestions(proposals []Proposal, limit int) []AssessmentSuggestion {
@@ -570,6 +714,13 @@ func optionLimit(value, fallback int) int {
 
 func minAssessmentInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxAssessmentInt(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

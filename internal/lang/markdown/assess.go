@@ -27,7 +27,8 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 	if err != nil {
 		return AssessmentReport{}, err
 	}
-	scores := markdownScores(validation.Passed, findings, violations)
+	scoreMetrics := markdownScoreMetricsForIndex(idx)
+	scores := markdownScores(validation.Passed, findings, violations, scoreMetrics)
 	diagnostics := append([]Diagnostic(nil), idx.diagnostics...)
 	diagnostics = append(diagnostics, validation.Diagnostics...)
 	executable := 0
@@ -66,10 +67,13 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 
 func markdownAssessmentMetrics(idx *index, opts AssessmentOptions) map[string]interface{} {
 	return map[string]interface{}{
-		"score_model":        "markdown-structure-v0",
+		"score_model":        "markdown-structure-v1",
 		"gates":              normalizedMarkdownAssessmentGates(opts.Gates),
 		"debt_marker_count":  len(idx.debtMarkers),
 		"debt_marker_counts": core.CountDebtMarkers(idx.debtMarkers),
+		"document_count":     len(idx.documents),
+		"heading_count":      markdownHeadingCount(idx),
+		"line_count":         markdownLineCount(idx),
 	}
 }
 
@@ -245,13 +249,43 @@ func markdownViolations(validation ValidationResult, opts AssessmentOptions) []V
 	return out
 }
 
-func markdownScores(validationPassed bool, findings []Finding, violations []Violation) ScoreSet {
+type markdownScoreMetrics struct {
+	DocumentCount int
+	HeadingCount  int
+	LineCount     int
+}
+
+func markdownScoreMetricsForIndex(idx *index) markdownScoreMetrics {
+	return markdownScoreMetrics{
+		DocumentCount: len(idx.documents),
+		HeadingCount:  markdownHeadingCount(idx),
+		LineCount:     markdownLineCount(idx),
+	}
+}
+
+func markdownHeadingCount(idx *index) int {
+	count := 0
+	for _, file := range idx.files {
+		count += len(file.headings)
+	}
+	return count
+}
+
+func markdownLineCount(idx *index) int {
+	count := 0
+	for _, lines := range idx.fileLOC {
+		count += lines
+	}
+	return count
+}
+
+func markdownScores(validationPassed bool, findings []Finding, violations []Violation, metrics markdownScoreMetrics) ScoreSet {
 	boundary := 100
 	testBoundary := 100
 	coupling := 100
 	sideEffect := 100
-	coverage := 100 - minAssessmentInt(50, countMarkdownFindings(findings, "coverage_")*25)
-	maintainability := 100 - minAssessmentInt(50, countMarkdownFindings(findings, "markdown_")*5) - minAssessmentInt(20, countMarkdownFindings(findings, "maintainability_debt_marker")*2)
+	coverage := 100 - markdownCoveragePenalty(countMarkdownFindings(findings, "coverage_"), metrics)
+	maintainability := markdownMaintainabilityScore(findings, metrics)
 	if maintainability < 50 {
 		maintainability = 50
 	}
@@ -260,7 +294,7 @@ func markdownScores(validationPassed bool, findings []Finding, violations []Viol
 	}
 	overall := minAssessmentInt(boundary, maintainability)
 	overall = minAssessmentInt(overall, coverage)
-	overall -= minAssessmentInt(30, len(violations)*10)
+	overall -= markdownViolationPenalty(violations, metrics)
 	if overall < 0 {
 		overall = 0
 	}
@@ -273,6 +307,35 @@ func markdownScores(validationPassed bool, findings []Finding, violations []Viol
 		Coverage:        coverage,
 		Maintainability: maintainability,
 	}
+}
+
+func markdownMaintainabilityScore(findings []Finding, metrics markdownScoreMetrics) int {
+	return markdownWeightedScore([]markdownScoreComponent{
+		{score: 100 - markdownStructurePenalty(findings, metrics), weight: 2},
+		{score: 100 - markdownDebtPenalty(countMarkdownFindings(findings, "maintainability_debt_marker"), metrics), weight: 1},
+	})
+}
+
+func markdownCoveragePenalty(coverageFindings int, metrics markdownScoreMetrics) int {
+	if metrics.DocumentCount == 0 && coverageFindings > 0 {
+		return 50
+	}
+	return markdownNormalizedRatePenalty(50, coverageFindings, maxMarkdownInt(metrics.DocumentCount, 1), 1)
+}
+
+func markdownStructurePenalty(findings []Finding, metrics markdownScoreMetrics) int {
+	weightedFindings := markdownWeightedFindingUnits(findings, "markdown_")
+	opportunities := maxMarkdownInt(metrics.DocumentCount+metrics.HeadingCount, 1)
+	return markdownNormalizedWeightedRatePenalty(50, weightedFindings, opportunities, 4, markdownWarningWeight)
+}
+
+func markdownDebtPenalty(markers int, metrics markdownScoreMetrics) int {
+	return markdownNormalizedRatePenalty(20, markers, maxMarkdownInt(metrics.LineCount, 1), 2)
+}
+
+func markdownViolationPenalty(violations []Violation, metrics markdownScoreMetrics) int {
+	weightedViolations := markdownWeightedViolationUnits(violations)
+	return markdownNormalizedWeightedRatePenalty(30, weightedViolations, maxMarkdownInt(metrics.LineCount, 1), 2, markdownErrorWeight)
 }
 
 func markdownGateEnabled(opts AssessmentOptions, gate AssessmentGate) bool {
@@ -313,6 +376,98 @@ func countMarkdownFindings(findings []Finding, prefix string) int {
 	return n
 }
 
+func markdownNormalizedRatePenalty(cap, events, opportunities, scale int) int {
+	return markdownNormalizedWeightedRatePenalty(cap, events, opportunities, scale, 1)
+}
+
+func markdownNormalizedWeightedRatePenalty(cap, eventUnits, opportunities, scale, unitScale int) int {
+	if cap <= 0 || eventUnits <= 0 {
+		return 0
+	}
+	if opportunities <= 0 || scale <= 0 || unitScale <= 0 {
+		return minAssessmentInt(cap, eventUnits)
+	}
+	eventRate := eventUnits * 1000
+	denominator := eventRate + scale*unitScale*opportunities
+	return (cap*eventRate + denominator - 1) / denominator
+}
+
+type markdownScoreComponent struct {
+	score  int
+	weight int
+}
+
+func markdownWeightedScore(components []markdownScoreComponent) int {
+	total := 0
+	weight := 0
+	for _, component := range components {
+		if component.weight <= 0 {
+			continue
+		}
+		total += clampMarkdownScore(component.score) * component.weight
+		weight += component.weight
+	}
+	if weight == 0 {
+		return 100
+	}
+	return (total + weight/2) / weight
+}
+
+func clampMarkdownScore(score int) int {
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
+}
+
+const (
+	markdownInfoWeight    = 1
+	markdownWarningWeight = 4
+	markdownErrorWeight   = 8
+)
+
+func markdownWeightedFindingUnits(findings []Finding, prefixes ...string) int {
+	total := 0
+	for _, finding := range findings {
+		if !markdownFindingHasAnyPrefix(finding, prefixes) {
+			continue
+		}
+		total += markdownSeverityWeight(finding.Severity)
+	}
+	return total
+}
+
+func markdownFindingHasAnyPrefix(finding Finding, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(finding.Kind, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func markdownWeightedViolationUnits(violations []Violation) int {
+	total := 0
+	for _, violation := range violations {
+		total += markdownSeverityWeight(violation.Severity)
+	}
+	return total
+}
+
+func markdownSeverityWeight(severity string) int {
+	switch severity {
+	case "info":
+		return markdownInfoWeight
+	case "error":
+		return markdownErrorWeight
+	default:
+		return markdownWarningWeight
+	}
+}
+
 func sectionText(src []byte, heading headingInfo) string {
 	start := heading.location.Range.End.Offset
 	end := heading.sectionRange.End.Offset
@@ -324,6 +479,13 @@ func sectionText(src []byte, heading headingInfo) string {
 
 func minAssessmentInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxMarkdownInt(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

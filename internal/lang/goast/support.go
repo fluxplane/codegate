@@ -11,6 +11,7 @@ func goAssessmentSupport() AssessmentSupport {
 			{ID: "max_cyclomatic_complexity", Category: "maintainability", Level: CapabilityBasic, Description: "Maximum AST-derived cyclomatic complexity across functions."},
 			{ID: "max_nesting_depth", Category: "maintainability", Level: CapabilityBasic, Description: "Maximum nested control-flow depth across functions."},
 			{ID: "max_function_loc", Category: "maintainability", Level: CapabilityBasic, Description: "Maximum non-comment lines in a function."},
+			{ID: "function_count", Category: "maintainability", Level: CapabilityBasic, Description: "Indexed non-test Go function count."},
 			{ID: "large_function_count", Category: "maintainability", Level: CapabilityBasic, Description: "Functions above the configured non-comment LOC threshold."},
 			{ID: "high_complexity_function_count", Category: "maintainability", Level: CapabilityBasic, Description: "Functions above the configured cyclomatic complexity threshold."},
 			{ID: "package_loc", Category: "maintainability", Level: CapabilityBasic, Description: "Non-comment LOC grouped by Go unit."},

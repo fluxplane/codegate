@@ -8,6 +8,9 @@ func markdownAssessmentSupport() AssessmentSupport {
 			{ID: "gates", Category: "reporting", Level: CapabilityBasic, Description: "Assessment gates applied to the report."},
 			{ID: "debt_marker_count", Category: "maintainability", Level: CapabilityBasic, Description: "Total TODO/FIXME/HACK/XXX/DEPRECATED markers in Markdown prose."},
 			{ID: "debt_marker_counts", Category: "maintainability", Level: CapabilityBasic, Description: "Debt marker counts grouped by marker kind."},
+			{ID: "document_count", Category: "maintainability", Level: CapabilityBasic, Description: "Indexed Markdown document count."},
+			{ID: "heading_count", Category: "maintainability", Level: CapabilityBasic, Description: "Indexed Markdown heading count."},
+			{ID: "line_count", Category: "maintainability", Level: CapabilityBasic, Description: "Indexed Markdown line count."},
 		},
 		Findings: []FindingSupport{
 			{ID: "coverage_no_markdown_files", Category: "coverage", Level: CapabilityBasic, Description: "No Markdown files were indexed for the selected scope."},

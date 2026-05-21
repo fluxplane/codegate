@@ -1,6 +1,6 @@
 # codegate
 
-![codegate Go quality](https://img.shields.io/badge/codegate%2Fgo-55%20C%2B-00ADD8)
+![codegate Go quality](https://img.shields.io/badge/codegate%2Fgo-95%20A%2B-00ADD8)
 
 `codegate` gives agents and automation a structured way to understand and improve a codebase. It can look up code facts, assess quality, suggest improvements, apply explicit operations in memory, validate the result, and show a diff before anything is committed.
 
@@ -217,7 +217,7 @@ CI systems can turn the JSON report into a README badge. Badges should name the 
 ![codegate Go quality](https://img.shields.io/badge/codegate%2Fgo-82%20B%2B%2B-00ADD8)
 ```
 
-Generate the values from `summary.score` and the CLI `rating` field in `codegate assess --format json`. The current README badge for this repository was generated from a Go assessment: `55 C+`.
+Generate the values from `summary.score` and the CLI `rating` field in `codegate assess --format json`. The current README badge for this repository was generated from a Go assessment: `95 A+`.
 
 For Go-specific badges, use the Go brand color `00ADD8`. If you prefer score-severity colors for dashboards, use:
 

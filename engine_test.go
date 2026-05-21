@@ -189,7 +189,7 @@ See [Missing](#missing).
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Metrics["provider_score_model"] != "markdown-structure-v0" || !hasFinding(report, "markdown_heading_level_jump") || !hasFinding(report, "markdown_broken_local_heading_link") {
+	if report.Metrics["provider_score_model"] != "markdown-structure-v1" || !hasFinding(report, "markdown_heading_level_jump") || !hasFinding(report, "markdown_broken_local_heading_link") {
 		t.Fatalf("unexpected markdown assessment: %#v", report)
 	}
 
@@ -347,7 +347,7 @@ func TestEngineAssessReportsMaintainabilityFindings(t *testing.T) {
 	if !hasFinding(report, "maintainability_high_pressure_unit") {
 		t.Fatalf("expected maintainability finding, got %#v", report.Findings)
 	}
-	if report.Summary.Findings != len(report.Findings) || report.Metrics["provider_score_model"] != "go-architecture-v0" {
+	if report.Summary.Findings != len(report.Findings) || report.Metrics["provider_score_model"] != "go-architecture-v1" {
 		t.Fatalf("unexpected assessment summary/metrics: %#v", report)
 	}
 }
@@ -1782,7 +1782,7 @@ const Name = "foo"
 	if !hasAllowedFinding(report, "architecture_fan_out") {
 		t.Fatalf("expected reviewed fan-out finding, got %#v", report.Findings)
 	}
-	if report.Scores.Boundary != 75 || report.Scores.SideEffect != 90 || report.Scores.Coverage != 80 || report.Scores.Coupling != 100 {
+	if report.Scores.Boundary != 75 || report.Scores.SideEffect != 95 || report.Scores.Coverage != 90 || report.Scores.Coupling != 100 {
 		t.Fatalf("unexpected agentruntime-style component scores: %#v", report.Scores)
 	}
 }

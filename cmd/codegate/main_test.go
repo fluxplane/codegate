@@ -169,7 +169,7 @@ func Target() string {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"provider_score_model": "go-architecture-v0"`) || !strings.Contains(got, `"architecture"`) {
+	if !strings.Contains(got, `"provider_score_model": "go-architecture-v1"`) || !strings.Contains(got, `"architecture"`) {
 		t.Fatalf("unexpected gated assess output:\n%s", got)
 	}
 }
@@ -788,7 +788,7 @@ See [Missing](#missing).
 		t.Fatal(err)
 	}
 	got := assessOut.String()
-	if !strings.Contains(got, `"provider_score_model": "markdown-structure-v0"`) || !strings.Contains(got, `"markdown_heading_level_jump"`) {
+	if !strings.Contains(got, `"provider_score_model": "markdown-structure-v1"`) || !strings.Contains(got, `"markdown_heading_level_jump"`) {
 		t.Fatalf("unexpected markdown assess output:\n%s", got)
 	}
 

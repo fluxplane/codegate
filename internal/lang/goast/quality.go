@@ -37,6 +37,7 @@ type goQualityMetrics struct {
 	HighComplexityFunctionCount int
 	TotalBranchCount            int
 	TotalNonCommentLOC          int
+	TotalFunctionCount          int
 	GeneratedLOC                int
 	CodeLOC                     int
 	TestLOC                     int
@@ -87,6 +88,7 @@ func (r *goQualityReport) merge(next goQualityReport) {
 	r.metrics.HighComplexityFunctionCount += next.metrics.HighComplexityFunctionCount
 	r.metrics.TotalBranchCount += next.metrics.TotalBranchCount
 	r.metrics.TotalNonCommentLOC += next.metrics.TotalNonCommentLOC
+	r.metrics.TotalFunctionCount += next.metrics.TotalFunctionCount
 	r.metrics.GeneratedLOC += next.metrics.GeneratedLOC
 	r.metrics.CodeLOC += next.metrics.CodeLOC
 	r.metrics.TestLOC += next.metrics.TestLOC
@@ -213,6 +215,7 @@ func (m goQualityMetrics) assessmentMetrics() map[string]interface{} {
 		"exported_symbol_count":          m.ExportedSymbolCount,
 		"exported_ratio":                 exportedRatio,
 		"branch_density_per_kloc":        branchDensity,
+		"function_count":                 m.TotalFunctionCount,
 		"generated_loc_percent":          generatedPercent,
 		"doc_coverage_percent":           docCoverage,
 		"undocumented_export_count":      m.UndocumentedExportCount,
@@ -354,6 +357,7 @@ func (c *goQualityCollector) collectDeclarations() {
 func (c *goQualityCollector) collectFunctionDeclarationQuality(fn *ast.FuncDecl) {
 	if !c.testFile {
 		c.report.metrics.TotalSymbolCount++
+		c.report.metrics.TotalFunctionCount++
 	}
 	c.collectExportDoc(fn.Name, fn.Doc, Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, fn.Name.Pos(), fn.Name.End())}, fn.Name.Name)
 	if c.testFile && c.isRunnableGoTestFunction(fn) {
