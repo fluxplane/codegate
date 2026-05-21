@@ -35,7 +35,7 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 func suggestUnusedPrivate(ctx context.Context, snapshot Snapshot, idx *index) ([]Proposal, error) {
 	used := map[SymbolID]bool{}
 	for _, occ := range idx.occurrences {
-		if occ.Kind != OccurrenceReference {
+		if !isUsageOccurrence(occ.Kind) {
 			continue
 		}
 		used[occ.SymbolID] = true
@@ -65,6 +65,15 @@ func suggestUnusedPrivate(ctx context.Context, snapshot Snapshot, idx *index) ([
 		})
 	}
 	return out, nil
+}
+
+func isUsageOccurrence(kind OccurrenceKind) bool {
+	switch kind {
+	case OccurrenceReference, OccurrenceRead, OccurrenceWrite, OccurrenceCall:
+		return true
+	default:
+		return false
+	}
 }
 
 func isGoEntrypoint(sym Symbol) bool {
@@ -245,7 +254,7 @@ func computeSymbolMetrics(idx *index) []SymbolMetrics {
 		}
 	}
 	for _, occ := range idx.occurrences {
-		if occ.Kind == OccurrenceDeclaration {
+		if occ.Kind == OccurrenceDeclaration || occ.Kind == OccurrenceDoc {
 			continue
 		}
 		m := ensureSymbolMetric(metrics, idx, occ.SymbolID)

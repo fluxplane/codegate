@@ -78,7 +78,7 @@ func computeSymbolMetrics(idx *core.Index) []SymbolMetrics {
 		}
 	}
 	for _, occ := range idx.Occurrences {
-		if occ.Kind != OccurrenceReference && occ.Kind != OccurrenceRead && occ.Kind != OccurrenceWrite && occ.Kind != OccurrenceDoc {
+		if occ.Kind != OccurrenceReference && occ.Kind != OccurrenceRead && occ.Kind != OccurrenceWrite && occ.Kind != OccurrenceCall && occ.Kind != OccurrenceImport && occ.Kind != OccurrenceDoc {
 			continue
 		}
 		m := ensureSymbolMetric(metrics, idx, occ.SymbolID)

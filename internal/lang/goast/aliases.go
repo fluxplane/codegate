@@ -14,6 +14,7 @@ type (
 	SymbolID                = core.SymbolID
 	SymbolKind              = core.SymbolKind
 	Symbol                  = core.Symbol
+	OccurrenceKind          = core.OccurrenceKind
 	Occurrence              = core.Occurrence
 	Edge                    = core.Edge
 	Diagnostic              = core.Diagnostic
@@ -76,16 +77,22 @@ const (
 	SymbolField     = core.SymbolField
 	SymbolConst     = core.SymbolConst
 	SymbolVar       = core.SymbolVar
+	SymbolImport    = core.SymbolImport
 )
 
 const (
 	OccurrenceDeclaration = core.OccurrenceDeclaration
 	OccurrenceReference   = core.OccurrenceReference
+	OccurrenceRead        = core.OccurrenceRead
+	OccurrenceWrite       = core.OccurrenceWrite
 	OccurrenceCall        = core.OccurrenceCall
+	OccurrenceImport      = core.OccurrenceImport
+	OccurrenceDoc         = core.OccurrenceDoc
 )
 
 const (
 	EdgeContains   = core.EdgeContains
+	EdgeReferences = core.EdgeReferences
 	EdgeCalls      = core.EdgeCalls
 	EdgeImports    = core.EdgeImports
 	EdgeImplements = core.EdgeImplements

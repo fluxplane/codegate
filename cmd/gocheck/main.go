@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/codewandler/editor"
+	"github.com/codewandler/editor/internal/lang/goast"
 )
 
 func main() {
@@ -51,6 +53,10 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	if err != nil {
 		return err
 	}
+	goIndex, err := goast.New().Index(ctx, source, scope)
+	if err != nil {
+		return err
+	}
 
 	goFiles, err := countGoFiles(source.fsys, includeTests)
 	if err != nil {
@@ -63,6 +69,7 @@ func run(ctx context.Context, root string, includeTests bool, maxProposals int) 
 	fmt.Printf("symbols: %d\n", len(symbols))
 	fmt.Printf("imports: %d\n", len(imports))
 	fmt.Printf("diagnostics: %d\n", len(packages.Diagnostics)+len(metrics.Diagnostics))
+	fmt.Printf("occurrences: %s\n", formatOccurrenceCounts(occurrenceCounts(goIndex.Occurrences)))
 	fmt.Println()
 
 	printTopMetrics(metrics.Units, 8)
@@ -184,6 +191,37 @@ func printProposals(proposals []editor.Proposal, limit int) {
 	if len(proposals) == 0 {
 		fmt.Println("  none")
 	}
+}
+
+func occurrenceCounts(occurrences []editor.Occurrence) map[editor.OccurrenceKind]int {
+	counts := map[editor.OccurrenceKind]int{}
+	for _, occ := range occurrences {
+		counts[occ.Kind]++
+	}
+	return counts
+}
+
+func formatOccurrenceCounts(counts map[editor.OccurrenceKind]int) string {
+	order := []editor.OccurrenceKind{
+		editor.OccurrenceDeclaration,
+		editor.OccurrenceRead,
+		editor.OccurrenceWrite,
+		editor.OccurrenceCall,
+		editor.OccurrenceImport,
+		editor.OccurrenceDoc,
+		editor.OccurrenceReference,
+	}
+	parts := make([]string, 0, len(order))
+	for _, kind := range order {
+		if counts[kind] == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%d", kind, counts[kind]))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " ")
 }
 
 func hasSuffix(s, suffix string) bool {

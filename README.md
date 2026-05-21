@@ -21,6 +21,7 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - package discovery
   - outlines and symbol search
   - position-based navigation and symbol info
+  - read/write/call/import/doc occurrence classification
   - references from selectors or source positions
   - direct and reverse imports
   - direct callers and callees
@@ -169,6 +170,7 @@ Supported today:
 
 - package discovery from `.go` files
 - declarations, references, direct calls, imports, and simple implementation edges
+- AST-classified read, write, call, import, and doc occurrences
 - source reads by symbol or source position
 - deterministic edits for symbols, functions, methods, imports, comments, moves, and struct tags
 - deterministic refactoring operations for Go signatures, parameters, receivers, struct fields, interface methods, and range-based function/method extraction
@@ -194,7 +196,7 @@ Upcoming work:
 1. Replace the existing agentruntime Go language plugin internals with calls into this library.
 2. Add an explicit OS filesystem adapter for durable commits outside core.
 3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
-4. Improve field/write/read occurrence classification and dynamic call limitations.
+4. Improve dynamic call limitations and type-aware selector classification.
 5. Expand refactoring validation for shadowing, field selector type checks, method dispatch, and complex call expressions.
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
 7. Add validation adapters for parse/typecheck/build/test workflows.

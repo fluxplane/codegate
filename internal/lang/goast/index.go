@@ -350,10 +350,24 @@ func indexImports(idx *index, pf parsedFile) {
 			Location: loc,
 		})
 		idx.edges = append(idx.edges, Edge{Kind: EdgeImports, From: pf.unit, To: importPath, Location: loc, Weight: 1})
+		idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: importOccurrenceID(pf, imp, importPath), Kind: OccurrenceImport, Name: importOccurrenceName(importPath, alias), Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
 	}
 }
 
+func importOccurrenceID(pf parsedFile, imp *ast.ImportSpec, importPath string) SymbolID {
+	return symbolID(pf.path, SymbolImport, importPath, pf.fset.Position(imp.Pos()).Offset)
+}
+
+func importOccurrenceName(importPath, alias string) string {
+	name := alias
+	if name == "" {
+		name = path.Base(importPath)
+	}
+	return name
+}
+
 func indexUses(idx *index, pf parsedFile) {
+	classified := classifiedOccurrences(pf)
 	for _, decl := range pf.file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Body == nil {
@@ -363,7 +377,7 @@ func indexUses(idx *index, pf parsedFile) {
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			if x, ok := n.(*ast.CallExpr); ok {
 				if callee := callTarget(idx, pf.unit, x.Fun); callee.ID != "" && caller.ID != "" {
-					loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Fun.Pos(), x.Fun.End())}
+					loc := Location{URI: pf.path, Range: callNameRange(pf.fset, x.Fun)}
 					idx.edges = append(idx.edges, Edge{Kind: EdgeCalls, From: string(caller.ID), To: string(callee.ID), Location: loc, Weight: 1})
 					idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: callee.ID, Kind: OccurrenceCall, Name: callee.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
 				}
@@ -376,17 +390,154 @@ func indexUses(idx *index, pf parsedFile) {
 		if !ok {
 			return true
 		}
-		if x.Obj != nil && x.Obj.Pos() == x.Pos() {
+		if classified.skip[x] {
 			return true
 		}
-		for _, sym := range idx.byName[x.Name] {
-			if sym.UnitID == pf.unit && sym.SelectionRange.Start.Offset != pf.fset.Position(x.Pos()).Offset {
-				loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Pos(), x.End())}
-				idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: sym.ID, Kind: OccurrenceReference, Name: x.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
-				break
+		kind := classified.kind[x]
+		if x.Obj != nil && x.Obj.Pos() == x.Pos() && kind != OccurrenceWrite {
+			return true
+		}
+		sym := symbolForIdent(idx, pf, x, kind == OccurrenceWrite)
+		if sym.ID == "" {
+			return true
+		}
+		loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Pos(), x.End())}
+		if kind == "" {
+			kind = OccurrenceRead
+		}
+		idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: sym.ID, Kind: kind, Name: x.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
+		idx.edges = append(idx.edges, Edge{Kind: EdgeReferences, From: pf.path, To: string(sym.ID), Location: loc, Weight: 1})
+		return true
+	})
+	indexDocOccurrences(idx, pf)
+}
+
+type occurrenceClassification struct {
+	kind map[*ast.Ident]OccurrenceKind
+	skip map[*ast.Ident]bool
+}
+
+func classifiedOccurrences(pf parsedFile) occurrenceClassification {
+	c := occurrenceClassification{kind: map[*ast.Ident]OccurrenceKind{}, skip: map[*ast.Ident]bool{}}
+	ast.Inspect(pf.file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			for _, expr := range x.Lhs {
+				markWriteExpr(c, expr)
 			}
+		case *ast.IncDecStmt:
+			markWriteExpr(c, x.X)
+		case *ast.RangeStmt:
+			if x.Key != nil {
+				markWriteExpr(c, x.Key)
+			}
+			if x.Value != nil {
+				markWriteExpr(c, x.Value)
+			}
+		case *ast.ValueSpec:
+			if len(x.Values) > 0 {
+				for _, name := range x.Names {
+					if name.Name != "_" {
+						c.kind[name] = OccurrenceWrite
+					}
+				}
+			}
+		case *ast.CallExpr:
+			markCallExpr(c, x.Fun)
+		case *ast.KeyValueExpr:
+			if id, ok := x.Key.(*ast.Ident); ok {
+				c.skip[id] = true
+			}
+		case *ast.SelectorExpr:
+			c.skip[x.Sel] = selectorNameShouldSkip(c, x.Sel)
 		}
 		return true
+	})
+	return c
+}
+
+func markWriteExpr(c occurrenceClassification, expr ast.Expr) {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		if x.Name != "_" {
+			c.kind[x] = OccurrenceWrite
+		}
+	case *ast.SelectorExpr:
+		c.kind[x.Sel] = OccurrenceWrite
+	case *ast.IndexExpr:
+		markWriteExpr(c, x.X)
+	case *ast.IndexListExpr:
+		markWriteExpr(c, x.X)
+	case *ast.StarExpr:
+		markWriteExpr(c, x.X)
+	case *ast.ParenExpr:
+		markWriteExpr(c, x.X)
+	}
+}
+
+func markCallExpr(c occurrenceClassification, expr ast.Expr) {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		c.skip[x] = true
+	case *ast.SelectorExpr:
+		c.skip[x.Sel] = true
+	}
+}
+
+func selectorNameShouldSkip(c occurrenceClassification, id *ast.Ident) bool {
+	if _, ok := c.kind[id]; ok {
+		return false
+	}
+	return c.skip[id]
+}
+
+func symbolForIdent(idx *index, pf parsedFile, id *ast.Ident, includeDeclaration bool) Symbol {
+	offset := pf.fset.Position(id.Pos()).Offset
+	for _, sym := range idx.byName[id.Name] {
+		if sym.UnitID == pf.unit && (includeDeclaration || sym.SelectionRange.Start.Offset != offset) {
+			return sym
+		}
+	}
+	return Symbol{}
+}
+
+func indexDocOccurrences(idx *index, pf parsedFile) {
+	for _, decl := range pf.file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Doc == nil {
+				continue
+			}
+			sym := findCallable(idx, pf, d)
+			addDocOccurrence(idx, pf, sym, d.Doc)
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					sym := firstUnitSymbol(idx.byName[s.Name.Name], pf.unit, "", "")
+					addDocOccurrence(idx, pf, sym, firstComment(s.Doc, d.Doc))
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						sym := firstUnitSymbol(idx.byName[name.Name], pf.unit, "", "")
+						addDocOccurrence(idx, pf, sym, firstComment(s.Doc, d.Doc))
+					}
+				}
+			}
+		}
+	}
+}
+
+func addDocOccurrence(idx *index, pf parsedFile, sym Symbol, group *ast.CommentGroup) {
+	if sym.ID == "" || group == nil {
+		return
+	}
+	loc := Location{URI: pf.path, Range: rangeOf(pf.fset, group.Pos(), group.End())}
+	idx.occurrences = append(idx.occurrences, Occurrence{
+		SymbolID: sym.ID,
+		Kind:     OccurrenceDoc,
+		Name:     sym.Name,
+		Location: loc,
+		Preview:  sourceLine(pf.src, loc.Range.Start.Offset),
 	})
 }
 
@@ -487,6 +638,17 @@ func callTarget(idx *index, unit string, expr ast.Expr) Symbol {
 	return Symbol{}
 }
 
+func callNameRange(fset *token.FileSet, expr ast.Expr) Range {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return rangeOf(fset, x.Pos(), x.End())
+	case *ast.SelectorExpr:
+		return rangeOf(fset, x.Sel.Pos(), x.Sel.End())
+	default:
+		return rangeOf(fset, expr.Pos(), expr.End())
+	}
+}
+
 func firstUnitSymbol(symbols []Symbol, unit string, kind SymbolKind, qname string) Symbol {
 	for _, sym := range symbols {
 		if sym.UnitID == unit && (kind == "" || sym.Kind == kind) && (qname == "" || sym.QualifiedName == qname) {
@@ -530,6 +692,15 @@ func computeMetrics(idx *index) []UnitMetrics {
 			}
 			if to, ok := idx.byID[SymbolID(edge.To)]; ok {
 				ensureUnitMetric(metrics, to.UnitID).CallFanIn++
+				ensureUnitMetric(metrics, to.UnitID).SymbolFanIn++
+			}
+		}
+		if edge.Kind == EdgeReferences {
+			fromUnit := idx.fileUnits[edge.From]
+			if fromUnit != "" {
+				ensureUnitMetric(metrics, fromUnit).SymbolFanOut++
+			}
+			if to, ok := idx.byID[SymbolID(edge.To)]; ok {
 				ensureUnitMetric(metrics, to.UnitID).SymbolFanIn++
 			}
 		}

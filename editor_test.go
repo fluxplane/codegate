@@ -631,6 +631,70 @@ func Target() {}
 	}
 }
 
+func TestGoOccurrenceKindsAndReferenceEdges(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+import "fmt"
+
+// Counter tracks calls.
+var Counter = 0
+
+type User struct {
+	Email string
+}
+
+func Target() {}
+
+func Use(user User) string {
+	Counter = Counter + 1
+	Counter++
+	user.Email = fmt.Sprint(Counter)
+	Target()
+	return user.Email
+}
+`,
+	})
+	idx, err := ed.buildIndex(ctx, Scope{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := onlySymbol(t, idx, "Counter", SymbolVar)
+	email := onlySymbol(t, idx, "Email", SymbolField)
+	target := onlySymbol(t, idx, "Target", SymbolFunction)
+
+	kinds := occurrencesByKind(idx.Occurrences)
+	if kinds[OccurrenceImport] == 0 {
+		t.Fatalf("expected import occurrence: %#v", idx.Occurrences)
+	}
+	if kinds[OccurrenceDoc] == 0 {
+		t.Fatalf("expected doc occurrence: %#v", idx.Occurrences)
+	}
+	if countOccurrenceKind(idx.Occurrences, counter.ID, OccurrenceWrite) < 2 {
+		t.Fatalf("expected Counter writes: %#v", idx.Occurrences)
+	}
+	if countOccurrenceKind(idx.Occurrences, counter.ID, OccurrenceRead) < 2 {
+		t.Fatalf("expected Counter reads: %#v", idx.Occurrences)
+	}
+	if countOccurrenceKind(idx.Occurrences, email.ID, OccurrenceWrite) != 1 || countOccurrenceKind(idx.Occurrences, email.ID, OccurrenceRead) != 1 {
+		t.Fatalf("expected Email read/write occurrences: %#v", idx.Occurrences)
+	}
+	if countOccurrenceKind(idx.Occurrences, target.ID, OccurrenceCall) != 1 {
+		t.Fatalf("expected Target call occurrence: %#v", idx.Occurrences)
+	}
+	foundReferenceEdge := false
+	for _, edge := range idx.Edges {
+		if edge.Kind == EdgeReferences && edge.To == string(counter.ID) {
+			foundReferenceEdge = true
+			break
+		}
+	}
+	if !foundReferenceEdge {
+		t.Fatalf("expected reference edge for Counter: %#v", idx.Edges)
+	}
+}
+
 func TestExpectedHashGuardsSemanticEdits(t *testing.T) {
 	ctx := context.Background()
 	for name, apply := range map[string]func(*ChangeSet) error{
@@ -1955,6 +2019,38 @@ func mustFiles(t *testing.T, changes *ChangeSet, ctx context.Context) []ChangedF
 		t.Fatal(err)
 	}
 	return files
+}
+
+func onlySymbol(t *testing.T, idx *core.Index, name string, kind SymbolKind) Symbol {
+	t.Helper()
+	var out []Symbol
+	for _, sym := range idx.Symbols {
+		if sym.Name == name && sym.Kind == kind {
+			out = append(out, sym)
+		}
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected one %s %q, got %#v", kind, name, out)
+	}
+	return out[0]
+}
+
+func occurrencesByKind(occurrences []Occurrence) map[OccurrenceKind]int {
+	out := map[OccurrenceKind]int{}
+	for _, occ := range occurrences {
+		out[occ.Kind]++
+	}
+	return out
+}
+
+func countOccurrenceKind(occurrences []Occurrence, id SymbolID, kind OccurrenceKind) int {
+	n := 0
+	for _, occ := range occurrences {
+		if occ.SymbolID == id && occ.Kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 func TestGoParserPackagesOnlyLiveInGoBackend(t *testing.T) {
