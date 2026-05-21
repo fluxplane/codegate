@@ -33,6 +33,7 @@ type (
 	ValidationOptions = core.ValidationOptions
 	ValidationResult  = core.ValidationResult
 	Validator         = core.Validator
+	ValidationAdapter = core.ValidationAdapter
 	Evidence          = core.Evidence
 	Scope             = core.Scope
 	SymbolSelector    = core.SymbolSelector
@@ -60,6 +61,7 @@ type (
 const (
 	ValidationParse     = core.ValidationParse
 	ValidationTypecheck = core.ValidationTypecheck
+	ValidationExternal  = core.ValidationExternal
 )
 
 const (

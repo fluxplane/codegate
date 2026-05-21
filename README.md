@@ -179,6 +179,7 @@ The `cmd/codegate` CLI exposes the same engine loop as JSON-first commands:
 go run ./cmd/codegate --root . --language go capabilities
 go run ./cmd/codegate --root . --language go lookup --name Target --kind function
 go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3
+go run ./cmd/codegate --root . --language go assess --gate all --view full --suggestions 3
 go run ./cmd/codegate --root . --language go assess --gate all --summary-only
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json
 go run ./cmd/codegate --root . --language go assess --gate architecture --rules codegate.rules.json --fail-on boundary,effects,unknown
@@ -190,7 +191,7 @@ go run ./cmd/codegate --root . --language markdown cycle --apply-first
 
 `assess --fail-on` prints the normal JSON report first, then exits non-zero if a selected category has an unallowed violation. Supported categories are `boundary`, `test-boundary`, `effects`, `unknown`, and `all`.
 
-Use `assess --summary-only` when an agent needs scores, compact metrics, and finding counts without full evidence payloads.
+`assess` defaults to the compact agent view: scores, compact metrics, counts, and small top lists without full evidence payloads. Use `--view full` for complete reports and `--view summary` or `--summary-only` for the smallest score/count payload.
 
 Use `cycle --apply-first` only when you want the first executable suggestion applied to an in-memory change set and returned as a diff.
 
@@ -239,6 +240,25 @@ engine, err := codegate.New().
 	Build(ctx)
 ```
 
+## Explicit Validation Adapters
+
+Core validation remains parse/typecheck or structural only. If a host application wants build, test, or policy checks, it can register a named validation adapter and explicitly request it:
+
+```go
+adapter := codegate.NewValidationAdapter("unit", func(ctx context.Context, source codegate.Source, opts codegate.ValidationOptions) (codegate.ValidationResult, error) {
+	// The host owns any build/test command execution and maps results back into codegate diagnostics.
+	return codegate.ValidationResult{Passed: true, Complete: true, Kinds: []codegate.ValidationKind{codegate.ValidationExternal}}, nil
+})
+
+engine, err := codegate.New().
+	WithFS(fsys).
+	WithLanguage(golang.New(golang.Config{})).
+	WithValidationAdapter(adapter).
+	Build(ctx)
+```
+
+Adapters only run when named in `ValidationOptions.External`. This keeps shell commands, tests, builds, and workspace-specific policy checks caller-controlled and auditable.
+
 ## Capabilities
 
 `Capabilities()` and `codegate capabilities` report both coarse backend capability levels and operation-level support. Agents can use this to choose safe calls without guessing which language supports which validation modes or edit operations.
@@ -278,7 +298,7 @@ Built-in backends:
 - Dynamic Go dispatch and function-value calls are incomplete.
 - Markdown support is structural; only conservative documentation fixes are executable.
 - CLI output is JSON-only.
-- External validation adapters for build/test workflows are not implemented yet.
+- External validation adapters are explicit caller-provided hooks; codegate does not ship shelling adapters by default.
 - Architecture policies are currently Go-only and AST-backed; tree-sitter-backed policy support for other languages is still upcoming.
 
 ## Release Readiness
@@ -291,7 +311,7 @@ Before tagging, run the checklist in [`RELEASE.md`](RELEASE.md). The normal test
 2. Add reusable architecture policy examples and adapters for common project shapes.
 3. Add a tree-sitter-backed backend proof for another code language such as Java or Groovy.
 4. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
-5. Add validation adapters for explicit build/test workflows.
+5. Add optional prebuilt validation adapter examples for explicit build/test workflows.
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
 7. Expand Markdown edit/refactor coverage for deterministic documentation fixes.
 8. Promote backend-local assessment signals into public `quality`, `security`, `performance`, and `testability` gates once Go plus at least one non-Go backend can produce comparable findings and metrics.

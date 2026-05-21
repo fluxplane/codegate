@@ -10,12 +10,12 @@ const (
 )
 
 type BackendInfo struct {
-	Language       LanguageID
-	Name           string
-	ResolutionMode string
-	Complete       bool
-	Diagnostics    []Diagnostic
-	Metadata       map[string]string
+	Language       LanguageID        `json:"language,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	ResolutionMode string            `json:"resolution_mode,omitempty"`
+	Complete       bool              `json:"complete,omitempty"`
+	Diagnostics    []Diagnostic      `json:"diagnostics,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 type BackendSpec struct {
@@ -106,18 +106,18 @@ type Backend interface {
 }
 
 type Index struct {
-	Documents   []Document
-	Packages    []PackageInfo
-	Symbols     []Symbol
-	Occurrences []Occurrence
-	Edges       []Edge
-	Imports     []ImportEdge
-	Diagnostics []Diagnostic
-	ByID        map[SymbolID]Symbol
-	ByName      map[string][]Symbol
-	UnitFiles   map[string][]string
-	FileUnits   map[string]string
-	FileLOC     map[string]int
+	Documents   []Document          `json:"documents,omitempty"`
+	Packages    []PackageInfo       `json:"packages,omitempty"`
+	Symbols     []Symbol            `json:"symbols,omitempty"`
+	Occurrences []Occurrence        `json:"occurrences,omitempty"`
+	Edges       []Edge              `json:"edges,omitempty"`
+	Imports     []ImportEdge        `json:"imports,omitempty"`
+	Diagnostics []Diagnostic        `json:"diagnostics,omitempty"`
+	ByID        map[SymbolID]Symbol `json:"-"`
+	ByName      map[string][]Symbol `json:"-"`
+	UnitFiles   map[string][]string `json:"-"`
+	FileUnits   map[string]string   `json:"-"`
+	FileLOC     map[string]int      `json:"-"`
 }
 
 func NewIndex() *Index {
@@ -131,34 +131,34 @@ func NewIndex() *Index {
 }
 
 type Document struct {
-	URI      string
-	Language LanguageID
-	UnitID   string
-	Version  string
+	URI      string     `json:"uri"`
+	Language LanguageID `json:"language"`
+	UnitID   string     `json:"unit_id,omitempty"`
+	Version  string     `json:"version,omitempty"`
 }
 
 type PackageInfo struct {
-	ID          string
-	Name        string
-	Dir         string
-	Files       []string
-	Diagnostics []Diagnostic
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Dir         string       `json:"dir,omitempty"`
+	Files       []string     `json:"files,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
 type Position struct {
-	Line   int
-	Column int
-	Offset int
+	Line   int `json:"line"`
+	Column int `json:"column"`
+	Offset int `json:"offset"`
 }
 
 type Range struct {
-	Start Position
-	End   Position
+	Start Position `json:"start"`
+	End   Position `json:"end"`
 }
 
 type Location struct {
-	URI   string
-	Range Range
+	URI   string `json:"uri,omitempty"`
+	Range Range  `json:"range,omitempty"`
 }
 
 type SymbolID string
@@ -188,22 +188,22 @@ const (
 )
 
 type Symbol struct {
-	ID             SymbolID
-	Language       LanguageID
-	Kind           SymbolKind
-	Name           string
-	QualifiedName  string
-	ContainerID    SymbolID
-	ContainerName  string
-	UnitID         string
-	Location       Location
-	SelectionRange Range
-	BodyRange      Range
-	Signature      string
-	Doc            string
-	Tags           map[string]string
-	Children       []Symbol
-	Backend        BackendInfo
+	ID             SymbolID          `json:"id,omitempty"`
+	Language       LanguageID        `json:"language,omitempty"`
+	Kind           SymbolKind        `json:"kind,omitempty"`
+	Name           string            `json:"name"`
+	QualifiedName  string            `json:"qualified_name,omitempty"`
+	ContainerID    SymbolID          `json:"container_id,omitempty"`
+	ContainerName  string            `json:"container_name,omitempty"`
+	UnitID         string            `json:"unit_id,omitempty"`
+	Location       Location          `json:"location,omitempty"`
+	SelectionRange Range             `json:"selection_range,omitempty"`
+	BodyRange      Range             `json:"body_range,omitempty"`
+	Signature      string            `json:"signature,omitempty"`
+	Doc            string            `json:"doc,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	Children       []Symbol          `json:"children,omitempty"`
+	Backend        BackendInfo       `json:"backend,omitempty"`
 }
 
 type OccurrenceKind string
@@ -221,12 +221,12 @@ const (
 )
 
 type Occurrence struct {
-	SymbolID SymbolID
-	Kind     OccurrenceKind
-	Name     string
-	Location Location
-	Preview  string
-	Evidence []Evidence
+	SymbolID SymbolID       `json:"symbol_id,omitempty"`
+	Kind     OccurrenceKind `json:"kind"`
+	Name     string         `json:"name,omitempty"`
+	Location Location       `json:"location,omitempty"`
+	Preview  string         `json:"preview,omitempty"`
+	Evidence []Evidence     `json:"evidence,omitempty"`
 }
 
 type EdgeKind string
@@ -243,18 +243,18 @@ const (
 )
 
 type Edge struct {
-	Kind     EdgeKind
-	From     string
-	To       string
-	Location Location
-	Weight   int
-	Evidence []Evidence
+	Kind     EdgeKind   `json:"kind"`
+	From     string     `json:"from"`
+	To       string     `json:"to"`
+	Location Location   `json:"location,omitempty"`
+	Weight   int        `json:"weight,omitempty"`
+	Evidence []Evidence `json:"evidence,omitempty"`
 }
 
 type Diagnostic struct {
-	Location Location
-	Severity string
-	Message  string
+	Location Location `json:"location,omitempty"`
+	Severity string   `json:"severity"`
+	Message  string   `json:"message"`
 }
 
 type ValidationKind string
@@ -262,23 +262,30 @@ type ValidationKind string
 const (
 	ValidationParse     ValidationKind = "parse"
 	ValidationTypecheck ValidationKind = "typecheck"
+	ValidationExternal  ValidationKind = "external"
 )
 
 type ValidationOptions struct {
-	Scope Scope
-	Kinds []ValidationKind
+	Scope    Scope            `json:"scope,omitempty"`
+	Kinds    []ValidationKind `json:"kinds,omitempty"`
+	External []string         `json:"external,omitempty"`
 }
 
 type ValidationResult struct {
-	Passed         bool
-	Kinds          []ValidationKind
-	Diagnostics    []Diagnostic
-	AffectedPaths  []string
-	ResolutionMode string
-	Complete       bool
+	Passed         bool             `json:"passed"`
+	Kinds          []ValidationKind `json:"kinds,omitempty"`
+	Diagnostics    []Diagnostic     `json:"diagnostics,omitempty"`
+	AffectedPaths  []string         `json:"affected_paths,omitempty"`
+	ResolutionMode string           `json:"resolution_mode,omitempty"`
+	Complete       bool             `json:"complete"`
 }
 
 type Validator interface {
+	Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error)
+}
+
+type ValidationAdapter interface {
+	Name() string
 	Validate(ctx context.Context, snapshot Snapshot, opts ValidationOptions) (ValidationResult, error)
 }
 
@@ -462,79 +469,79 @@ type AssessmentProvider interface {
 }
 
 type Evidence struct {
-	Kind     string
-	Message  string
-	Location Location
-	Metrics  map[string]float64
+	Kind     string             `json:"kind"`
+	Message  string             `json:"message,omitempty"`
+	Location Location           `json:"location,omitempty"`
+	Metrics  map[string]float64 `json:"metrics,omitempty"`
 }
 
 type Scope struct {
-	Root         string
-	Path         string
-	UnitID       string
-	Language     LanguageID
-	IncludeTests bool
-	MaxFiles     int
-	MaxBytes     int64
+	Root         string     `json:"root,omitempty"`
+	Path         string     `json:"path,omitempty"`
+	UnitID       string     `json:"unit_id,omitempty"`
+	Language     LanguageID `json:"language,omitempty"`
+	IncludeTests bool       `json:"include_tests,omitempty"`
+	MaxFiles     int        `json:"max_files,omitempty"`
+	MaxBytes     int64      `json:"max_bytes,omitempty"`
 }
 
 type SymbolSelector struct {
-	ID            SymbolID
-	Language      LanguageID
-	Name          string
-	QualifiedName string
-	Kind          SymbolKind
-	Container     string
-	UnitID        string
-	Path          string
-	IncludeTests  *bool
+	ID            SymbolID   `json:"id,omitempty"`
+	Language      LanguageID `json:"language,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	QualifiedName string     `json:"qualified_name,omitempty"`
+	Kind          SymbolKind `json:"kind,omitempty"`
+	Container     string     `json:"container,omitempty"`
+	UnitID        string     `json:"unit_id,omitempty"`
+	Path          string     `json:"path,omitempty"`
+	IncludeTests  *bool      `json:"include_tests,omitempty"`
 }
 
 type PositionSelector struct {
-	Path   string
-	Line   int
-	Column int
-	Offset *int
+	Path   string `json:"path,omitempty"`
+	Line   int    `json:"line,omitempty"`
+	Column int    `json:"column,omitempty"`
+	Offset *int   `json:"offset,omitempty"`
 }
 
 type ResolveResult struct {
-	Matches     []Symbol
-	Ambiguous   bool
-	Diagnostics []Diagnostic
+	Matches     []Symbol     `json:"matches,omitempty"`
+	Ambiguous   bool         `json:"ambiguous,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
 type NavigationTarget struct {
-	Text            string
-	Name            string
-	NodeKind        string
-	PackageID       string
-	Location        Location
-	EnclosingSymbol *Symbol
+	Text            string   `json:"text,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	NodeKind        string   `json:"node_kind,omitempty"`
+	PackageID       string   `json:"package_id,omitempty"`
+	Location        Location `json:"location,omitempty"`
+	EnclosingSymbol *Symbol  `json:"enclosing_symbol,omitempty"`
 }
 
 type NavigationOptions struct {
-	Scope             Scope
-	IncludeDocs       bool
-	FallbackEnclosing bool
-	MaxResults        int
+	Scope             Scope `json:"scope,omitempty"`
+	IncludeDocs       bool  `json:"include_docs,omitempty"`
+	FallbackEnclosing bool  `json:"fallback_enclosing,omitempty"`
+	MaxResults        int   `json:"max_results,omitempty"`
 }
 
 type NavigationResult struct {
-	Target         NavigationTarget
-	Symbols        []Symbol
-	Locations      []Location
-	Diagnostics    []Diagnostic
-	ResolutionMode string
-	Complete       bool
-	Warnings       []string
-	Indexed        bool
-	Fresh          bool
+	Target         NavigationTarget `json:"target"`
+	Symbols        []Symbol         `json:"symbols,omitempty"`
+	Locations      []Location       `json:"locations,omitempty"`
+	Diagnostics    []Diagnostic     `json:"diagnostics,omitempty"`
+	ResolutionMode string           `json:"resolution_mode,omitempty"`
+	Complete       bool             `json:"complete"`
+	Warnings       []string         `json:"warnings,omitempty"`
+	Indexed        bool             `json:"indexed,omitempty"`
+	Fresh          bool             `json:"fresh,omitempty"`
 }
 
 type ReferenceOptions struct {
-	Scope              Scope
-	IncludeDeclaration bool
-	MaxResults         int
+	Scope              Scope `json:"scope,omitempty"`
+	IncludeDeclaration bool  `json:"include_declaration,omitempty"`
+	MaxResults         int   `json:"max_results,omitempty"`
 }
 
 type ImportDirection string
@@ -547,119 +554,119 @@ const (
 
 type ImportQuery struct {
 	// Scope constrains the files indexed before import filtering is applied.
-	Scope Scope
+	Scope Scope `json:"scope,omitempty"`
 	// Path selects the source file or directory for direct import queries.
-	Path string
+	Path string `json:"path,omitempty"`
 	// PackageID selects the source package/unit (ImportEdge.FromUnit) for direct import queries.
-	PackageID string
+	PackageID string `json:"package_id,omitempty"`
 	// ImportPath selects the target import path for direct and reverse import queries.
-	ImportPath  string
-	Direction   ImportDirection
-	MaxResults  int
-	IncludeTest *bool
+	ImportPath  string          `json:"import_path,omitempty"`
+	Direction   ImportDirection `json:"direction,omitempty"`
+	MaxResults  int             `json:"max_results,omitempty"`
+	IncludeTest *bool           `json:"include_test,omitempty"`
 }
 
 type ImportResult struct {
-	DirectImports    []ImportEdge
-	ReverseImporters []ImportEdge
-	TargetImportPath string
-	Diagnostics      []Diagnostic
-	ResolutionMode   string
-	Complete         bool
-	Warnings         []string
-	Indexed          bool
-	Fresh            bool
+	DirectImports    []ImportEdge `json:"direct_imports,omitempty"`
+	ReverseImporters []ImportEdge `json:"reverse_importers,omitempty"`
+	TargetImportPath string       `json:"target_import_path,omitempty"`
+	Diagnostics      []Diagnostic `json:"diagnostics,omitempty"`
+	ResolutionMode   string       `json:"resolution_mode,omitempty"`
+	Complete         bool         `json:"complete"`
+	Warnings         []string     `json:"warnings,omitempty"`
+	Indexed          bool         `json:"indexed,omitempty"`
+	Fresh            bool         `json:"fresh,omitempty"`
 }
 
 type PackageResult struct {
-	Packages    []PackageInfo
-	Diagnostics []Diagnostic
-	Indexed     bool
-	Fresh       bool
+	Packages    []PackageInfo `json:"packages,omitempty"`
+	Diagnostics []Diagnostic  `json:"diagnostics,omitempty"`
+	Indexed     bool          `json:"indexed,omitempty"`
+	Fresh       bool          `json:"fresh,omitempty"`
 }
 
 type Outline struct {
-	Documents   []Document
-	Symbols     []Symbol
-	Diagnostics []Diagnostic
+	Documents   []Document   `json:"documents,omitempty"`
+	Symbols     []Symbol     `json:"symbols,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
 type SourceFragment struct {
-	Symbol   Symbol
-	Source   string
-	Comments string
-	Imports  []ImportEdge
-	Hash     string
+	Symbol   Symbol       `json:"symbol"`
+	Source   string       `json:"source,omitempty"`
+	Comments string       `json:"comments,omitempty"`
+	Imports  []ImportEdge `json:"imports,omitempty"`
+	Hash     string       `json:"hash,omitempty"`
 }
 
 type ImportEdge struct {
-	FromUnit string
-	FromPath string
-	Import   string
-	Alias    string
-	Location Location
+	FromUnit string   `json:"from_unit,omitempty"`
+	FromPath string   `json:"from_path,omitempty"`
+	Import   string   `json:"import"`
+	Alias    string   `json:"alias,omitempty"`
+	Location Location `json:"location,omitempty"`
 }
 
 type CallEdge struct {
-	CallerID string
-	CalleeID string
-	Caller   Symbol
-	Callee   Symbol
-	Name     string
-	Kind     string
-	Location Location
-	Preview  string
+	CallerID string   `json:"caller_id,omitempty"`
+	CalleeID string   `json:"callee_id,omitempty"`
+	Caller   Symbol   `json:"caller,omitempty"`
+	Callee   Symbol   `json:"callee,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Location Location `json:"location,omitempty"`
+	Preview  string   `json:"preview,omitempty"`
 }
 
 type Implementation struct {
-	Interface Symbol
-	Concrete  Symbol
-	Location  Location
-	Evidence  []Evidence
+	Interface Symbol     `json:"interface"`
+	Concrete  Symbol     `json:"concrete"`
+	Location  Location   `json:"location,omitempty"`
+	Evidence  []Evidence `json:"evidence,omitempty"`
 }
 
 type UnitMetrics struct {
-	UnitID              string
-	DirectFanIn         int
-	DirectFanOut        int
-	SymbolFanIn         int
-	SymbolFanOut        int
-	CallFanIn           int
-	CallFanOut          int
-	InterfaceCount      int
-	ImplementationCount int
-	PublicSymbolCount   int
-	FileCount           int
-	LOC                 int
-	PressureScore       float64
-	Evidence            []Evidence
+	UnitID              string     `json:"unit_id"`
+	DirectFanIn         int        `json:"direct_fan_in,omitempty"`
+	DirectFanOut        int        `json:"direct_fan_out,omitempty"`
+	SymbolFanIn         int        `json:"symbol_fan_in,omitempty"`
+	SymbolFanOut        int        `json:"symbol_fan_out,omitempty"`
+	CallFanIn           int        `json:"call_fan_in,omitempty"`
+	CallFanOut          int        `json:"call_fan_out,omitempty"`
+	InterfaceCount      int        `json:"interface_count,omitempty"`
+	ImplementationCount int        `json:"implementation_count,omitempty"`
+	PublicSymbolCount   int        `json:"public_symbol_count,omitempty"`
+	FileCount           int        `json:"file_count,omitempty"`
+	LOC                 int        `json:"loc,omitempty"`
+	PressureScore       float64    `json:"pressure_score,omitempty"`
+	Evidence            []Evidence `json:"evidence,omitempty"`
 }
 
 type SymbolMetrics struct {
-	SymbolID            SymbolID
-	UnitID              string
-	Kind                SymbolKind
-	Name                string
-	QualifiedName       string
-	Location            Location
-	ReferenceCount      int
-	CallFanIn           int
-	CallFanOut          int
-	ImplementationCount int
-	PressureScore       float64
-	Evidence            []Evidence
+	SymbolID            SymbolID   `json:"symbol_id,omitempty"`
+	UnitID              string     `json:"unit_id,omitempty"`
+	Kind                SymbolKind `json:"kind,omitempty"`
+	Name                string     `json:"name,omitempty"`
+	QualifiedName       string     `json:"qualified_name,omitempty"`
+	Location            Location   `json:"location,omitempty"`
+	ReferenceCount      int        `json:"reference_count,omitempty"`
+	CallFanIn           int        `json:"call_fan_in,omitempty"`
+	CallFanOut          int        `json:"call_fan_out,omitempty"`
+	ImplementationCount int        `json:"implementation_count,omitempty"`
+	PressureScore       float64    `json:"pressure_score,omitempty"`
+	Evidence            []Evidence `json:"evidence,omitempty"`
 }
 
 type Metrics struct {
-	Units       []UnitMetrics
-	Symbols     []SymbolMetrics
-	Diagnostics []Diagnostic
+	Units       []UnitMetrics   `json:"units,omitempty"`
+	Symbols     []SymbolMetrics `json:"symbols,omitempty"`
+	Diagnostics []Diagnostic    `json:"diagnostics,omitempty"`
 }
 
 type ChangedFile struct {
-	Path   string
-	Before []byte
-	After  []byte
+	Path   string `json:"path"`
+	Before []byte `json:"before,omitempty"`
+	After  []byte `json:"after,omitempty"`
 }
 
 type Operation interface {
@@ -706,14 +713,14 @@ const (
 )
 
 type TextEdit struct {
-	Path        string
-	Range       Range
-	Replacement string
+	Path        string `json:"path"`
+	Range       Range  `json:"range"`
+	Replacement string `json:"replacement"`
 }
 
 type FileEdit struct {
-	Path  string
-	Edits []TextEdit
+	Path  string     `json:"path"`
+	Edits []TextEdit `json:"edits,omitempty"`
 }
 
 type ReplaceFunction struct {
@@ -1036,16 +1043,16 @@ const (
 )
 
 type Proposal struct {
-	ID         string
-	Kind       RefactorKind
-	Title      string
-	Summary    string
-	Confidence Confidence
-	Risk       RiskLevel
-	Targets    []Symbol
-	Evidence   []Evidence
-	Operations []Operation
-	Metrics    map[string]float64
+	ID         string             `json:"id"`
+	Kind       RefactorKind       `json:"kind"`
+	Title      string             `json:"title"`
+	Summary    string             `json:"summary,omitempty"`
+	Confidence Confidence         `json:"confidence"`
+	Risk       RiskLevel          `json:"risk"`
+	Targets    []Symbol           `json:"targets,omitempty"`
+	Evidence   []Evidence         `json:"evidence,omitempty"`
+	Operations []Operation        `json:"operations,omitempty"`
+	Metrics    map[string]float64 `json:"metrics,omitempty"`
 }
 
 type SuggestOption func(*SuggestOptions)

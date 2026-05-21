@@ -21,11 +21,12 @@ import (
 type Option func(*Editor) error
 
 type Editor struct {
-	root      string
-	fsys      fs.FS
-	source    Source
-	languages []LanguageID
-	backends  map[LanguageID]Backend
+	root               string
+	fsys               fs.FS
+	source             Source
+	languages          []LanguageID
+	backends           map[LanguageID]Backend
+	validationAdapters map[string]ValidationAdapter
 
 	mu      sync.RWMutex
 	overlay map[string][]byte
@@ -35,10 +36,11 @@ type Editor struct {
 // should prefer New and the Engine facade.
 func NewEditor(root string, opts ...Option) (*Editor, error) {
 	ed := &Editor{
-		root:      core.CleanPath(root),
-		languages: []LanguageID{Go},
-		backends:  map[LanguageID]Backend{},
-		overlay:   map[string][]byte{},
+		root:               core.CleanPath(root),
+		languages:          []LanguageID{Go},
+		backends:           map[LanguageID]Backend{},
+		validationAdapters: map[string]ValidationAdapter{},
+		overlay:            map[string][]byte{},
 	}
 	for _, opt := range opts {
 		if err := opt(ed); err != nil {
@@ -117,6 +119,22 @@ func WithBackend(backend Backend) Option {
 			return errors.New("codegate: backend has empty language")
 		}
 		ed.backends[spec.Language] = backend
+		return nil
+	}
+}
+
+// WithValidationAdapter registers an explicit external validation adapter.
+// Adapters only run when named in ValidationOptions.External.
+func WithValidationAdapter(adapter ValidationAdapter) Option {
+	return func(ed *Editor) error {
+		if adapter == nil {
+			return errors.New("codegate: nil validation adapter")
+		}
+		name := strings.TrimSpace(adapter.Name())
+		if name == "" {
+			return errors.New("codegate: validation adapter has empty name")
+		}
+		ed.validationAdapters[name] = adapter
 		return nil
 	}
 }
@@ -451,7 +469,9 @@ func (e *Editor) Validate(ctx context.Context, opts ValidationOptions) (Validati
 
 func (e *Editor) validate(ctx context.Context, opts ValidationOptions, overlay map[string][]byte) (ValidationResult, error) {
 	kinds := normalizeValidationKinds(opts.Kinds)
+	external := normalizeExternalValidation(opts.External)
 	opts.Kinds = kinds
+	opts.External = external
 	result := ValidationResult{
 		Passed:        true,
 		Kinds:         append([]ValidationKind(nil), kinds...),
@@ -493,6 +513,37 @@ func (e *Editor) validate(ctx context.Context, opts ValidationOptions, overlay m
 			}
 		}
 	}
+	for _, name := range external {
+		if ctx.Err() != nil {
+			return ValidationResult{}, ctx.Err()
+		}
+		adapter, ok := e.validationAdapters[name]
+		if !ok {
+			return ValidationResult{}, fmt.Errorf("codegate: unknown validation adapter %q", name)
+		}
+		next, err := adapter.Validate(ctx, e.snapshot(overlay), opts)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		result.Kinds = appendValidationKind(result.Kinds, ValidationExternal)
+		if !next.Passed {
+			result.Passed = false
+		}
+		if !next.Complete {
+			result.Complete = false
+		}
+		if result.ResolutionMode == "" {
+			result.ResolutionMode = next.ResolutionMode
+		}
+		result.Diagnostics = append(result.Diagnostics, next.Diagnostics...)
+		for _, p := range next.AffectedPaths {
+			p = core.CleanPath(p)
+			if !seenPath[p] {
+				seenPath[p] = true
+				result.AffectedPaths = append(result.AffectedPaths, p)
+			}
+		}
+	}
 	if result.ResolutionMode == "" {
 		result.ResolutionMode = e.resolutionMode(opts.Scope)
 	}
@@ -501,6 +552,29 @@ func (e *Editor) validate(ctx context.Context, opts ValidationOptions, overlay m
 		result.Passed = false
 	}
 	return result, nil
+}
+
+func normalizeExternalValidation(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func appendValidationKind(kinds []ValidationKind, kind ValidationKind) []ValidationKind {
+	for _, existing := range kinds {
+		if existing == kind {
+			return kinds
+		}
+	}
+	return append(kinds, kind)
 }
 
 func normalizeValidationKinds(kinds []ValidationKind) []ValidationKind {

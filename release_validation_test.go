@@ -44,6 +44,15 @@ func main() {
 		}).
 		WithLanguage(golang.New(golang.Config{})).
 		WithLanguage(markdown.New(markdown.Config{})).
+		WithValidationAdapter(codegate.NewValidationAdapter("unit", func(context.Context, codegate.Source, codegate.ValidationOptions) (codegate.ValidationResult, error) {
+			return codegate.ValidationResult{
+				Passed:         true,
+				Complete:       true,
+				Kinds:          []codegate.ValidationKind{codegate.ValidationExternal},
+				ResolutionMode: "external",
+				AffectedPaths:  []string{"demo.go"},
+			}, nil
+		})).
 		Build(ctx)
 	if err != nil {
 		panic(err)
@@ -59,7 +68,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	validation, err := engine.Validate(ctx, codegate.ValidationOptions{Scope: codegate.Scope{Language: codegate.Go}, Kinds: []codegate.ValidationKind{codegate.ValidationParse}})
+	validation, err := engine.Validate(ctx, codegate.ValidationOptions{
+		Scope:    codegate.Scope{Language: codegate.Go},
+		Kinds:    []codegate.ValidationKind{codegate.ValidationParse},
+		External: []string{"unit"},
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -77,7 +90,7 @@ func main() {
 	if _, err := source.ReadFile(ctx, "demo.go"); err != nil {
 		panic(err)
 	}
-	fmt.Println("ok", lookup.Symbols[0].Name, report.Language, validation.Passed)
+	fmt.Println("ok", lookup.Symbols[0].Name, report.Language, validation.Passed, len(validation.AffectedPaths))
 }
 `)
 	env := append(os.Environ(), "GOCACHE="+filepath.Join(dir, ".gocache"), "GOWORK=off")
@@ -94,7 +107,7 @@ func main() {
 	if err != nil {
 		t.Fatalf("external consumer failed: %v\n%s", err, out)
 	}
-	if got := strings.TrimSpace(string(out)); got != "ok Target markdown true" {
+	if got := strings.TrimSpace(string(out)); got != "ok Target markdown true 1" {
 		t.Fatalf("unexpected external consumer output: %q", got)
 	}
 }

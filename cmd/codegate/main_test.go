@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/codewandler/codegate"
 )
 
 func TestCodegateAssessCommand(t *testing.T) {
@@ -166,6 +168,75 @@ func Complex(a, b, c, d, e, f int) int {
 	}
 	if strings.Contains(got, `"findings": [`) || strings.Contains(got, `"evidence"`) || strings.Contains(got, `"top_units"`) {
 		t.Fatalf("summary-only output should not include full evidence arrays:\n%s", got)
+	}
+}
+
+func TestCodegateAssessViews(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", `package demo
+
+func Complex(a, b, c, d, e, f int) int {
+	if a > 0 {
+		if b > 0 {
+			if c > 0 {
+				if d > 0 {
+					if e > 0 {
+						return 1
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+`)
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "default compact",
+			args:    []string{"--root", root, "assess", "--gate", "maintainability"},
+			want:    []string{`"top_findings"`, `"top_units"`, `"suggestions"`},
+			notWant: []string{`"findings": [`, `"evidence"`},
+		},
+		{
+			name:    "summary",
+			args:    []string{"--root", root, "assess", "--gate", "maintainability", "--view", "summary"},
+			want:    []string{`"summary"`, `"finding_counts"`},
+			notWant: []string{`"top_findings"`, `"top_units"`, `"evidence"`},
+		},
+		{
+			name: "full",
+			args: []string{"--root", root, "assess", "--gate", "maintainability", "--view", "full"},
+			want: []string{`"findings": [`, `"evidence"`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			a := &app{out: &out, err: &bytes.Buffer{}}
+			cmd := a.rootCommand()
+			cmd.SetContext(context.Background())
+			cmd.SetArgs(tc.args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("expected %s in output:\n%s", want, got)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Fatalf("did not expect %s in output:\n%s", notWant, got)
+				}
+			}
+		})
 	}
 }
 
@@ -393,6 +464,48 @@ func TestCodegateAssessRejectsUnknownGate(t *testing.T) {
 	}
 }
 
+func TestCodegateValidateExternalAdapter(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", "package demo\n")
+
+	adapter := codegate.NewValidationAdapter("unit", func(context.Context, codegate.Source, codegate.ValidationOptions) (codegate.ValidationResult, error) {
+		return codegate.ValidationResult{
+			Passed:         true,
+			Complete:       true,
+			Kinds:          []codegate.ValidationKind{codegate.ValidationExternal},
+			ResolutionMode: "external",
+			AffectedPaths:  []string{"demo.go"},
+		}, nil
+	})
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}, validationAdapters: []codegate.ValidationAdapter{adapter}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "validate", "--external", "unit"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"external"`) || !strings.Contains(got, `"demo.go"`) || !strings.Contains(got, `"passed": true`) || !strings.Contains(got, `"affected_paths"`) {
+		t.Fatalf("unexpected external validation output:\n%s", got)
+	}
+}
+
+func TestCodegateValidateRejectsUnknownExternalAdapter(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, root, "demo.go", "package demo\n")
+
+	a := &app{out: &bytes.Buffer{}, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "validate", "--external", "missing"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected unknown external adapter to fail")
+	}
+}
+
 func TestCodegateLookupCommand(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
@@ -412,7 +525,7 @@ func Target() string {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"Name": "Target"`) || !strings.Contains(got, `"QualifiedName": "Target"`) {
+	if !strings.Contains(got, `"name": "Target"`) || !strings.Contains(got, `"qualified_name": "Target"`) {
 		t.Fatalf("unexpected lookup output:\n%s", got)
 	}
 }
@@ -492,7 +605,7 @@ See [Missing](#missing).
 		t.Fatal(err)
 	}
 	got = lookupOut.String()
-	if !strings.Contains(got, `"Name": "Jumped"`) || !strings.Contains(got, `"Language": "markdown"`) {
+	if !strings.Contains(got, `"name": "Jumped"`) || !strings.Contains(got, `"language": "markdown"`) {
 		t.Fatalf("unexpected markdown lookup output:\n%s", got)
 	}
 }

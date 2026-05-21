@@ -22,13 +22,14 @@ type Engine interface {
 // EngineBuilder collects workspace and language backend configuration before
 // constructing an Engine.
 type EngineBuilder struct {
-	roots     []string
-	source    Source
-	fsys      fs.FS
-	backends  []Backend
-	languages []LanguageID
-	language  LanguageID
-	err       error
+	roots              []string
+	source             Source
+	fsys               fs.FS
+	backends           []Backend
+	validationAdapters []ValidationAdapter
+	languages          []LanguageID
+	language           LanguageID
+	err                error
 }
 
 // New starts building an agent-facing codegate engine. Callers must provide a
@@ -94,6 +95,21 @@ func (b *EngineBuilder) WithLanguage(backend Backend) *EngineBuilder {
 	return b
 }
 
+// WithValidationAdapter registers an explicit external validation adapter.
+// Adapters only run when selected by ValidationOptions.External.
+func (b *EngineBuilder) WithValidationAdapter(adapter ValidationAdapter) *EngineBuilder {
+	if adapter == nil {
+		b.err = errors.New("codegate: nil validation adapter")
+		return b
+	}
+	if adapter.Name() == "" {
+		b.err = errors.New("codegate: validation adapter has empty name")
+		return b
+	}
+	b.validationAdapters = append(b.validationAdapters, adapter)
+	return b
+}
+
 // Build validates the builder configuration and returns an Engine.
 func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 	if ctx.Err() != nil {
@@ -120,6 +136,9 @@ func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 	}
 	for _, backend := range b.backends {
 		opts = append(opts, WithBackend(backend))
+	}
+	for _, adapter := range b.validationAdapters {
+		opts = append(opts, WithValidationAdapter(adapter))
 	}
 	ed, err := NewEditor(root, opts...)
 	if err != nil {

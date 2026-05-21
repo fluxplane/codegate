@@ -24,9 +24,10 @@ type cliConfig struct {
 }
 
 type app struct {
-	cfg cliConfig
-	out io.Writer
-	err io.Writer
+	cfg                cliConfig
+	out                io.Writer
+	err                io.Writer
+	validationAdapters []codegate.ValidationAdapter
 }
 
 type suggestionSummary struct {
@@ -45,7 +46,7 @@ type suggestionSummary struct {
 type lookupQuery = codegate.LookupQuery
 
 type cycleResult struct {
-	Assessment codegate.AssessmentReport      `json:"assessment"`
+	Assessment compactAssessmentReport        `json:"assessment"`
 	Selected   *codegate.AssessmentSuggestion `json:"selected,omitempty"`
 	Applied    bool                           `json:"applied"`
 	Validation *codegate.ValidationSummary    `json:"validation,omitempty"`
@@ -63,12 +64,48 @@ type compactAssessmentReport struct {
 	FindingCounts         map[string]int             `json:"finding_counts,omitempty"`
 	FindingCategoryCounts map[string]int             `json:"finding_category_counts,omitempty"`
 	ViolationCounts       map[string]int             `json:"violation_counts,omitempty"`
+	TopFindings           []compactIssue             `json:"top_findings,omitempty"`
+	TopViolations         []compactIssue             `json:"top_violations,omitempty"`
+	TopUnits              []compactUnit              `json:"top_units,omitempty"`
 	Suggestions           compactSuggestionSummary   `json:"suggestions"`
+	TopSuggestions        []compactSuggestion        `json:"top_suggestions,omitempty"`
 }
 
 type compactSuggestionSummary struct {
 	Total      int `json:"total"`
 	Executable int `json:"executable"`
+}
+
+type compactIssue struct {
+	Kind     string            `json:"kind"`
+	Severity string            `json:"severity"`
+	Location codegate.Location `json:"location,omitempty"`
+	Package  string            `json:"package,omitempty"`
+	Symbol   string            `json:"symbol,omitempty"`
+	Allowed  bool              `json:"allowed,omitempty"`
+	Reason   string            `json:"reason,omitempty"`
+}
+
+type compactUnit struct {
+	UnitID        string  `json:"unit_id"`
+	DirectFanIn   int     `json:"direct_fan_in,omitempty"`
+	DirectFanOut  int     `json:"direct_fan_out,omitempty"`
+	CallFanIn     int     `json:"call_fan_in,omitempty"`
+	CallFanOut    int     `json:"call_fan_out,omitempty"`
+	FileCount     int     `json:"file_count,omitempty"`
+	LOC           int     `json:"loc,omitempty"`
+	PressureScore float64 `json:"pressure_score,omitempty"`
+}
+
+type compactSuggestion struct {
+	ID         string                `json:"id"`
+	Kind       codegate.RefactorKind `json:"kind"`
+	Title      string                `json:"title"`
+	Summary    string                `json:"summary,omitempty"`
+	Confidence codegate.Confidence   `json:"confidence"`
+	Risk       codegate.RiskLevel    `json:"risk"`
+	Operations int                   `json:"operations"`
+	Metrics    map[string]float64    `json:"metrics,omitempty"`
 }
 
 func main() {
@@ -180,6 +217,7 @@ func (a *app) assessCommand() *cobra.Command {
 	var rulesPath string
 	var failOn []string
 	var summaryOnly bool
+	var view string
 	cmd := &cobra.Command{
 		Use:   "assess",
 		Short: "Create an agent-readable quality assessment",
@@ -196,9 +234,12 @@ func (a *app) assessCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var output interface{} = report
 			if summaryOnly {
-				output = summarizeAssessmentReport(report)
+				view = "summary"
+			}
+			output, err := assessmentOutput(report, view)
+			if err != nil {
+				return err
 			}
 			if err := a.print(output); err != nil {
 				return err
@@ -217,7 +258,8 @@ func (a *app) assessCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&gates, "gate", []string{"all"}, "assessment gate: architecture, maintainability, safety, coverage, or all")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "architecture rules JSON file")
 	cmd.Flags().StringSliceVar(&failOn, "fail-on", nil, "comma-separated failure categories: boundary, test-boundary, effects, unknown, or all")
-	cmd.Flags().BoolVar(&summaryOnly, "summary-only", false, "print compact assessment summary without full finding evidence")
+	cmd.Flags().StringVar(&view, "view", "compact", "assessment output view: compact, summary, or full")
+	cmd.Flags().BoolVar(&summaryOnly, "summary-only", false, "alias for --view summary")
 	return cmd
 }
 
@@ -246,6 +288,7 @@ func (a *app) suggestCommand() *cobra.Command {
 }
 
 func (a *app) validateCommand() *cobra.Command {
+	var external []string
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Run explicit validation checks",
@@ -255,8 +298,9 @@ func (a *app) validateCommand() *cobra.Command {
 				return err
 			}
 			result, err := eng.Validate(cmd.Context(), codegate.ValidationOptions{
-				Scope: scope,
-				Kinds: validationKinds(scope.Language),
+				Scope:    scope,
+				Kinds:    validationKinds(scope.Language),
+				External: external,
 			})
 			if err != nil {
 				return err
@@ -264,6 +308,7 @@ func (a *app) validateCommand() *cobra.Command {
 			return a.print(result)
 		},
 	}
+	cmd.Flags().StringSliceVar(&external, "external", nil, "explicit external validation adapter names to run")
 	return cmd
 }
 
@@ -278,7 +323,7 @@ func (a *app) cycleCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := cycleResult{Assessment: assessment}
+			result := cycleResult{Assessment: summarizeAssessmentReport(assessment, "compact")}
 			var selected *codegate.AssessmentSuggestion
 			for i := range assessment.Suggestions {
 				if assessment.Suggestions[i].Operations > 0 {
@@ -352,12 +397,15 @@ func (a *app) engine(ctx context.Context) (codegate.Engine, codegate.Scope, erro
 	default:
 		return nil, codegate.Scope{}, fmt.Errorf("language %q is not wired; supported languages: go, markdown", a.cfg.language)
 	}
-	eng, err := codegate.New().
+	builder := codegate.New().
 		Roots(a.cfg.root).
 		WithSource(dirSource{fsys: os.DirFS(a.cfg.root)}).
 		WithLanguage(golang.New(golang.Config{})).
-		WithLanguage(markdown.New(markdown.Config{})).
-		Build(ctx)
+		WithLanguage(markdown.New(markdown.Config{}))
+	for _, adapter := range a.validationAdapters {
+		builder.WithValidationAdapter(adapter)
+	}
+	eng, err := builder.Build(ctx)
 	if err != nil {
 		return nil, codegate.Scope{}, err
 	}
@@ -372,8 +420,21 @@ func (a *app) assess(ctx context.Context, limit int, gates []codegate.Assessment
 	return eng.Assess(ctx, codegate.AssessmentOptions{Scope: scope, SuggestionLimit: limit, Gates: gates, Architecture: rules})
 }
 
-func summarizeAssessmentReport(report codegate.AssessmentReport) compactAssessmentReport {
-	return compactAssessmentReport{
+func assessmentOutput(report codegate.AssessmentReport, view string) (interface{}, error) {
+	switch view {
+	case "", "compact":
+		return summarizeAssessmentReport(report, "compact"), nil
+	case "summary":
+		return summarizeAssessmentReport(report, "summary"), nil
+	case "full":
+		return report, nil
+	default:
+		return nil, fmt.Errorf("unsupported assessment view %q", view)
+	}
+}
+
+func summarizeAssessmentReport(report codegate.AssessmentReport, view string) compactAssessmentReport {
+	out := compactAssessmentReport{
 		Root:                  report.Root,
 		Language:              report.Language,
 		Summary:               report.Summary,
@@ -388,6 +449,90 @@ func summarizeAssessmentReport(report codegate.AssessmentReport) compactAssessme
 			Executable: report.Summary.ExecutableFixes,
 		},
 	}
+	if view == "compact" {
+		out.TopFindings = compactFindings(report.Findings, 10)
+		out.TopViolations = compactViolations(report.Violations, 10)
+		out.TopUnits = compactUnits(report.TopUnits, 5)
+		out.TopSuggestions = compactSuggestions(report.Suggestions, 10)
+	}
+	return out
+}
+
+func compactFindings(findings []codegate.Finding, limit int) []compactIssue {
+	out := make([]compactIssue, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, compactIssue{
+			Kind:     finding.Kind,
+			Severity: finding.Severity,
+			Location: finding.Location,
+			Package:  finding.Package,
+			Symbol:   finding.Symbol,
+			Allowed:  finding.Allowed,
+			Reason:   finding.Reason,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func compactViolations(violations []codegate.Violation, limit int) []compactIssue {
+	out := make([]compactIssue, 0, len(violations))
+	for _, violation := range violations {
+		out = append(out, compactIssue{
+			Kind:     violation.Kind,
+			Severity: violation.Severity,
+			Location: violation.Location,
+			Package:  violation.Package,
+			Symbol:   violation.Symbol,
+			Reason:   violation.Reason,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func compactUnits(units []codegate.UnitMetrics, limit int) []compactUnit {
+	out := make([]compactUnit, 0, len(units))
+	for _, unit := range units {
+		out = append(out, compactUnit{
+			UnitID:        unit.UnitID,
+			DirectFanIn:   unit.DirectFanIn,
+			DirectFanOut:  unit.DirectFanOut,
+			CallFanIn:     unit.CallFanIn,
+			CallFanOut:    unit.CallFanOut,
+			FileCount:     unit.FileCount,
+			LOC:           unit.LOC,
+			PressureScore: unit.PressureScore,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func compactSuggestions(suggestions []codegate.AssessmentSuggestion, limit int) []compactSuggestion {
+	out := make([]compactSuggestion, 0, len(suggestions))
+	for _, suggestion := range suggestions {
+		out = append(out, compactSuggestion{
+			ID:         suggestion.ID,
+			Kind:       suggestion.Kind,
+			Title:      suggestion.Title,
+			Summary:    suggestion.Summary,
+			Confidence: suggestion.Confidence,
+			Risk:       suggestion.Risk,
+			Operations: suggestion.Operations,
+			Metrics:    suggestion.Metrics,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func compactAssessmentMetrics(metrics map[string]interface{}) map[string]interface{} {
