@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/codewandler/editor/internal/core"
 )
@@ -57,6 +58,20 @@ func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operat
 		return compiler.compileRenameGoImport(ctx, x)
 	case MoveSymbol:
 		return compiler.compileMoveSymbol(ctx, x)
+	case AddGoParameter:
+		return compiler.compileAddGoParameter(ctx, x)
+	case RemoveGoParameter:
+		return compiler.compileRemoveGoParameter(ctx, x)
+	case RenameGoParameter:
+		return compiler.compileRenameGoParameter(ctx, x)
+	case AddGoStructField:
+		return compiler.compileAddGoStructField(ctx, x)
+	case RemoveGoStructField:
+		return compiler.compileRemoveGoStructField(ctx, x)
+	case ExtractGoFunction:
+		return compiler.compileExtractGoFunction(ctx, x)
+	case ExtractGoMethod:
+		return compiler.compileExtractGoMethod(ctx, x)
 	default:
 		return nil, fmt.Errorf("editor: go backend does not support operation %q", op.Kind())
 	}
@@ -556,10 +571,251 @@ func (c editCompiler) compileMoveSymbol(ctx context.Context, op MoveSymbol) ([]F
 	if len(target) == 0 || target[len(target)-1] != '\n' {
 		replacement = "\n" + replacement
 	}
-	return []FileEdit{
+	edits := []FileEdit{
 		{Path: sym.Location.URI, Edits: []TextEdit{{Path: sym.Location.URI, Range: deleteRange, Replacement: ""}}},
 		{Path: toPath, Edits: []TextEdit{{Path: toPath, Range: appendRange, Replacement: replacement}}},
-	}, nil
+	}
+	if op.ReconcileImports {
+		extra, err := c.moveImportEdits(ctx, sym, sourceText, toPath)
+		if err != nil {
+			return nil, err
+		}
+		edits = append(edits, extra...)
+	}
+	return edits, nil
+}
+
+func (c editCompiler) compileAddGoParameter(ctx context.Context, op AddGoParameter) ([]FileEdit, error) {
+	if !isValidIdentifier(op.Name) {
+		return nil, fmt.Errorf("editor: invalid Go parameter name %q", op.Name)
+	}
+	if strings.TrimSpace(op.Type) == "" {
+		return nil, errors.New("editor: AddGoParameter requires Type")
+	}
+	if strings.TrimSpace(op.DefaultValue) == "" {
+		return nil, errors.New("editor: AddGoParameter requires DefaultValue")
+	}
+	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	paramText := op.Name + " " + strings.TrimSpace(op.Type)
+	edits := []FileEdit{{Path: pf.path, Edits: []TextEdit{insertListItemEdit(pf.fset, fn.Type.Params.Opening, fn.Type.Params.Closing, paramRanges(pf.fset, fn.Type.Params), op.Position, paramText)}}}
+	callEdits, err := c.callArgumentEdits(ctx, idx, sym, op.Position, op.DefaultValue, true)
+	if err != nil {
+		return nil, err
+	}
+	return mergeFileEdits(append(edits, callEdits...)), nil
+}
+
+func (c editCompiler) compileRemoveGoParameter(ctx context.Context, op RemoveGoParameter) ([]FileEdit, error) {
+	if op.Name == "" {
+		return nil, errors.New("editor: RemoveGoParameter requires Name")
+	}
+	idx, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	params := namedParamRanges(pf.fset, fn.Type.Params)
+	pos := -1
+	var target Range
+	var groupNames int
+	for i, param := range params {
+		if param.name == op.Name {
+			pos = i
+			target = param.r
+			groupNames = param.groupNames
+			if groupNames > 1 {
+				target = param.nameRange
+			}
+			break
+		}
+	}
+	if pos < 0 {
+		return nil, fmt.Errorf("editor: parameter %q not found", op.Name)
+	}
+	replacement := ""
+	if groupNames > 1 {
+		replacement = removeGroupedNameReplacement(pf.src, target)
+	}
+	edits := []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: removeListItemRange(pf.src, target), Replacement: replacement}}}}
+	callEdits, err := c.callArgumentEdits(ctx, idx, sym, pos, "", false)
+	if err != nil {
+		return nil, err
+	}
+	return mergeFileEdits(append(edits, callEdits...)), nil
+}
+
+func (c editCompiler) compileRenameGoParameter(ctx context.Context, op RenameGoParameter) ([]FileEdit, error) {
+	if op.OldName == "" || !isValidIdentifier(op.NewName) {
+		return nil, errors.New("editor: RenameGoParameter requires valid OldName and NewName")
+	}
+	_, sym, pf, fn, err := c.resolveFunctionDecl(ctx, op.Target)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	var edits []TextEdit
+	found := false
+	for _, param := range namedParamRanges(pf.fset, fn.Type.Params) {
+		if param.name == op.OldName {
+			found = true
+			edits = append(edits, TextEdit{Path: pf.path, Range: param.nameRange, Replacement: op.NewName})
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("editor: parameter %q not found", op.OldName)
+	}
+	if fn.Body != nil {
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if ok && id.Name == op.OldName {
+				edits = append(edits, TextEdit{Path: pf.path, Range: rangeOf(pf.fset, id.Pos(), id.End()), Replacement: op.NewName})
+			}
+			return true
+		})
+	}
+	return []FileEdit{{Path: pf.path, Edits: edits}}, nil
+}
+
+func (c editCompiler) compileAddGoStructField(ctx context.Context, op AddGoStructField) ([]FileEdit, error) {
+	if !isValidIdentifier(op.Name) {
+		return nil, fmt.Errorf("editor: invalid Go field name %q", op.Name)
+	}
+	if strings.TrimSpace(op.Type) == "" {
+		return nil, errors.New("editor: AddGoStructField requires Type")
+	}
+	sym, pf, st, err := c.resolveStructType(ctx, op.Struct)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	for _, field := range st.Fields.List {
+		for _, name := range field.Names {
+			if name.Name == op.Name {
+				return nil, fmt.Errorf("editor: field %q already exists", op.Name)
+			}
+		}
+	}
+	line := op.Name + " " + strings.TrimSpace(op.Type)
+	if op.Tag != "" {
+		line += " `" + strings.Trim(op.Tag, "`") + "`"
+	}
+	if op.Comment != "" {
+		line = "// " + strings.TrimSpace(op.Comment) + "\n" + line
+	}
+	fields := fieldRanges(pf.fset, st.Fields)
+	edit := insertStructFieldEdit(pf.fset, st.Fields.Opening, st.Fields.Closing, fields, op.Position, line)
+	edit.Path = pf.path
+	return []FileEdit{{Path: pf.path, Edits: []TextEdit{edit}}}, nil
+}
+
+func (c editCompiler) compileRemoveGoStructField(ctx context.Context, op RemoveGoStructField) ([]FileEdit, error) {
+	if op.Field == "" {
+		return nil, errors.New("editor: RemoveGoStructField requires Field")
+	}
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Struct))
+	if err != nil {
+		return nil, err
+	}
+	sym, pf, st, err := c.resolveStructTypeFromIndex(ctx, idx, op.Struct)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	var fieldSym Symbol
+	for _, child := range sym.Children {
+		if child.Name == op.Field {
+			fieldSym = child
+			break
+		}
+	}
+	if fieldSym.ID == "" {
+		return nil, fmt.Errorf("editor: field %q not found", op.Field)
+	}
+	for _, occ := range idx.occurrences {
+		if occ.SymbolID == fieldSym.ID && occ.Kind != OccurrenceDeclaration {
+			return nil, fmt.Errorf("editor: field %q has indexed references", op.Field)
+		}
+	}
+	for _, field := range st.Fields.List {
+		for _, name := range field.Names {
+			if name.Name == op.Field {
+				r := expandLineRange(pf.src, rangeOf(pf.fset, field.Pos(), field.End()))
+				replacement := ""
+				if len(field.Names) > 1 {
+					r = removeListItemRange(pf.src, rangeOf(pf.fset, name.Pos(), name.End()))
+					replacement = removeGroupedNameReplacement(pf.src, rangeOf(pf.fset, name.Pos(), name.End()))
+				}
+				return []FileEdit{{Path: pf.path, Edits: []TextEdit{{Path: pf.path, Range: r, Replacement: replacement}}}}, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("editor: field %q not found", op.Field)
+}
+
+func (c editCompiler) compileExtractGoFunction(ctx context.Context, op ExtractGoFunction) ([]FileEdit, error) {
+	return c.compileExtract(ctx, op.Path, op.Range, "", op.Name, op.Params, op.Results, op.InsertAfter, op.ReplaceWithCall)
+}
+
+func (c editCompiler) compileExtractGoMethod(ctx context.Context, op ExtractGoMethod) ([]FileEdit, error) {
+	return c.compileExtract(ctx, op.Path, op.Range, op.Receiver, op.Name, op.Params, op.Results, op.InsertAfter, op.ReplaceWithCall)
+}
+
+func (c editCompiler) compileExtract(ctx context.Context, p string, r Range, receiver, name, params, results string, insertAfter SymbolSelector, replaceWithCall string) ([]FileEdit, error) {
+	p = core.CleanPath(p)
+	if p == "." || name == "" || !isValidIdentifier(name) {
+		return nil, errors.New("editor: extract requires Path and valid Name")
+	}
+	src, err := c.snapshot.ReadFile(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if r.Start.Offset < 0 || r.End.Offset <= r.Start.Offset || r.End.Offset > len(src) {
+		return nil, errors.New("editor: invalid extraction range")
+	}
+	idx, err := buildIndex(ctx, c.snapshot, Scope{Path: p, Language: Go})
+	if err != nil {
+		return nil, err
+	}
+	for _, sym := range idx.symbols {
+		if sym.Location.URI == p && sym.Name == name {
+			return nil, fmt.Errorf("editor: symbol %q already exists", name)
+		}
+	}
+	insertOffset := len(src)
+	if insertAfter.Name != "" || insertAfter.ID != "" || insertAfter.QualifiedName != "" {
+		insertAfter.Path = p
+		sym, err := exactSymbol(idx, insertAfter, "insert-after symbol")
+		if err != nil {
+			return nil, err
+		}
+		insertOffset = sym.Location.Range.End.Offset
+	} else if enclosing := enclosingFunction(idx, p, r.Start.Offset, r.End.Offset); enclosing.ID != "" {
+		insertOffset = enclosing.Location.Range.End.Offset
+	}
+	body := strings.TrimSpace(string(src[r.Start.Offset:r.End.Offset]))
+	if body == "" {
+		return nil, errors.New("editor: extraction body is empty")
+	}
+	decl := formatExtractedDecl(receiver, name, params, results, body)
+	edits := []TextEdit{{Path: p, Range: Range{Start: Position{Offset: insertOffset}, End: Position{Offset: insertOffset}}, Replacement: "\n\n" + decl + "\n"}}
+	if replaceWithCall != "" {
+		edits = append(edits, TextEdit{Path: p, Range: r, Replacement: replaceWithCall})
+	}
+	return []FileEdit{{Path: p, Edits: edits}}, nil
 }
 
 func moveDeclarationSource(sym Symbol, source string) string {
@@ -595,6 +851,23 @@ func exactSymbol(idx *index, sel SymbolSelector, kind string) (Symbol, error) {
 	return matches[0], nil
 }
 
+func mergeFileEdits(fileEdits []FileEdit) []FileEdit {
+	byPath := map[string][]TextEdit{}
+	for _, fe := range fileEdits {
+		byPath[fe.Path] = append(byPath[fe.Path], fe.Edits...)
+	}
+	paths := make([]string, 0, len(byPath))
+	for p := range byPath {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	out := make([]FileEdit, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, FileEdit{Path: p, Edits: byPath[p]})
+	}
+	return out
+}
+
 func supportedDeclarationEdit(sym Symbol) error {
 	switch sym.Kind {
 	case SymbolFunction, SymbolMethod, SymbolType, SymbolStruct, SymbolInterface, SymbolConst, SymbolVar:
@@ -625,6 +898,419 @@ func (c editCompiler) selectFile(ctx context.Context, filePath, unitID, label st
 	}
 	sort.Strings(files)
 	return files[0], nil
+}
+
+type rangeItem struct {
+	name       string
+	r          Range
+	nameRange  Range
+	groupNames int
+}
+
+func (c editCompiler) resolveFunctionDecl(ctx context.Context, sel SymbolSelector) (*index, Symbol, parsedFile, *ast.FuncDecl, error) {
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(sel))
+	if err != nil {
+		return nil, Symbol{}, parsedFile{}, nil, err
+	}
+	sym, err := exactSymbol(idx, sel, "function")
+	if err != nil {
+		return nil, Symbol{}, parsedFile{}, nil, err
+	}
+	if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod {
+		return nil, Symbol{}, parsedFile{}, nil, errors.New("editor: target must be a function or method")
+	}
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return nil, Symbol{}, parsedFile{}, nil, err
+	}
+	pf, err := parseOne(sym.Location.URI, src)
+	if err != nil {
+		return nil, Symbol{}, parsedFile{}, nil, err
+	}
+	for _, decl := range pf.file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		qname := fn.Name.Name
+		if fn.Recv != nil && len(fn.Recv.List) > 0 {
+			qname = receiverName(fn.Recv.List[0].Type) + "." + fn.Name.Name
+		}
+		if qname == sym.QualifiedName {
+			return idx, sym, pf, fn, nil
+		}
+	}
+	return nil, Symbol{}, parsedFile{}, nil, errors.New("editor: function declaration not found")
+}
+
+func (c editCompiler) resolveStructType(ctx context.Context, sel SymbolSelector) (Symbol, parsedFile, *ast.StructType, error) {
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(sel))
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	return c.resolveStructTypeFromIndex(ctx, idx, sel)
+}
+
+func (c editCompiler) resolveStructTypeFromIndex(ctx context.Context, idx *index, sel SymbolSelector) (Symbol, parsedFile, *ast.StructType, error) {
+	if sel.Kind == "" {
+		sel.Kind = SymbolStruct
+	}
+	sym, err := exactSymbol(idx, sel, "struct")
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	if sym.Kind != SymbolStruct {
+		return Symbol{}, parsedFile{}, nil, errors.New("editor: target must be a struct")
+	}
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	pf, err := parseOne(sym.Location.URI, src)
+	if err != nil {
+		return Symbol{}, parsedFile{}, nil, err
+	}
+	for _, decl := range pf.file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || ts.Name.Name != sym.Name {
+				continue
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return Symbol{}, parsedFile{}, nil, errors.New("editor: target is not a struct")
+			}
+			return sym, pf, st, nil
+		}
+	}
+	return Symbol{}, parsedFile{}, nil, errors.New("editor: struct declaration not found")
+}
+
+func paramRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
+	if fields == nil {
+		return nil
+	}
+	var out []Range
+	for _, field := range fields.List {
+		out = append(out, rangeOf(fset, field.Pos(), field.End()))
+	}
+	return out
+}
+
+func namedParamRanges(fset *token.FileSet, fields *ast.FieldList) []rangeItem {
+	if fields == nil {
+		return nil
+	}
+	var out []rangeItem
+	for _, field := range fields.List {
+		if len(field.Names) == 0 {
+			continue
+		}
+		for _, name := range field.Names {
+			out = append(out, rangeItem{name: name.Name, r: rangeOf(fset, field.Pos(), field.End()), nameRange: rangeOf(fset, name.Pos(), name.End()), groupNames: len(field.Names)})
+		}
+	}
+	return out
+}
+
+func fieldRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
+	if fields == nil {
+		return nil
+	}
+	var out []Range
+	for _, field := range fields.List {
+		out = append(out, rangeOf(fset, field.Pos(), field.End()))
+	}
+	return out
+}
+
+func insertListItemEdit(fset *token.FileSet, opening, closing token.Pos, items []Range, pos int, text string) TextEdit {
+	if pos < 0 || pos > len(items) {
+		pos = len(items)
+	}
+	if len(items) == 0 {
+		offset := fset.Position(opening).Offset + 1
+		return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: text}
+	}
+	if pos == len(items) {
+		offset := fset.Position(closing).Offset
+		return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: ", " + text}
+	}
+	offset := items[pos].Start.Offset
+	return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: text + ", "}
+}
+
+func insertStructFieldEdit(fset *token.FileSet, opening, closing token.Pos, items []Range, pos int, text string) TextEdit {
+	if pos < 0 || pos > len(items) {
+		pos = len(items)
+	}
+	if len(items) == 0 {
+		offset := fset.Position(opening).Offset + 1
+		return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: "\n\t" + text + "\n"}
+	}
+	if pos == len(items) {
+		offset := fset.Position(closing).Offset
+		return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: "\t" + text + "\n"}
+	}
+	offset := items[pos].Start.Offset
+	return TextEdit{Range: Range{Start: Position{Offset: offset}, End: Position{Offset: offset}}, Replacement: text + "\n\t"}
+}
+
+func removeListItemRange(src []byte, r Range) Range {
+	start, end := r.Start.Offset, r.End.Offset
+	for end < len(src) && (src[end] == ' ' || src[end] == '\t') {
+		end++
+	}
+	if end < len(src) && src[end] == ',' {
+		end++
+		for end < len(src) && src[end] == ' ' {
+			end++
+		}
+		return Range{Start: Position{Offset: start}, End: Position{Offset: end}}
+	}
+	for start > 0 && src[start-1] == ' ' {
+		start--
+	}
+	if start > 0 && src[start-1] == ',' {
+		start--
+	}
+	return Range{Start: Position{Offset: start}, End: Position{Offset: end}}
+}
+
+func removeGroupedNameReplacement(src []byte, r Range) string {
+	start := r.Start.Offset
+	for start > 0 && src[start-1] == ' ' {
+		start--
+	}
+	if start > 0 && src[start-1] == ',' {
+		return " "
+	}
+	return ""
+}
+
+func (c editCompiler) callArgumentEdits(ctx context.Context, idx *index, target Symbol, pos int, value string, add bool) ([]FileEdit, error) {
+	byPath := map[string][]TextEdit{}
+	for _, file := range idx.unitFiles[target.UnitID] {
+		src, err := c.snapshot.ReadFile(ctx, file)
+		if err != nil {
+			return nil, err
+		}
+		pf, err := parseOne(file, src)
+		if err != nil {
+			return nil, err
+		}
+		ast.Inspect(pf.file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			callee := callTarget(idx, target.UnitID, call.Fun)
+			if callee.ID != target.ID {
+				return true
+			}
+			if add {
+				edit := insertListItemEdit(pf.fset, call.Lparen, call.Rparen, exprRanges(pf.fset, call.Args), pos, value)
+				edit.Path = file
+				byPath[file] = append(byPath[file], edit)
+				return true
+			}
+			if pos < 0 || pos >= len(call.Args) {
+				byPath[file] = append(byPath[file], TextEdit{Path: file, Range: Range{Start: Position{Offset: -1}}, Replacement: ""})
+				return true
+			}
+			r := rangeOf(pf.fset, call.Args[pos].Pos(), call.Args[pos].End())
+			byPath[file] = append(byPath[file], TextEdit{Path: file, Range: removeListItemRange(src, r), Replacement: ""})
+			return true
+		})
+	}
+	var out []FileEdit
+	for p, edits := range byPath {
+		for _, edit := range edits {
+			if edit.Range.Start.Offset < 0 {
+				return nil, errors.New("editor: call site has too few arguments")
+			}
+		}
+		out = append(out, FileEdit{Path: p, Edits: edits})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+func exprRanges(fset *token.FileSet, exprs []ast.Expr) []Range {
+	out := make([]Range, 0, len(exprs))
+	for _, expr := range exprs {
+		out = append(out, rangeOf(fset, expr.Pos(), expr.End()))
+	}
+	return out
+}
+
+func enclosingFunction(idx *index, p string, start, end int) Symbol {
+	var best Symbol
+	for _, sym := range idx.symbols {
+		if sym.Location.URI != p || (sym.Kind != SymbolFunction && sym.Kind != SymbolMethod) {
+			continue
+		}
+		if sym.BodyRange.Start.Offset <= start && end <= sym.BodyRange.End.Offset {
+			if best.ID == "" || sym.BodyRange.Start.Offset > best.BodyRange.Start.Offset {
+				best = sym
+			}
+		}
+	}
+	return best
+}
+
+func formatExtractedDecl(receiver, name, params, results, body string) string {
+	head := "func "
+	if strings.TrimSpace(receiver) != "" {
+		head += "(" + strings.TrimSpace(receiver) + ") "
+	}
+	head += name + "(" + strings.TrimSpace(params) + ")"
+	if strings.TrimSpace(results) != "" {
+		head += " " + strings.TrimSpace(results)
+	}
+	return head + " {\n" + body + "\n}"
+}
+
+func (c editCompiler) moveImportEdits(ctx context.Context, sym Symbol, sourceText, toPath string) ([]FileEdit, error) {
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return nil, err
+	}
+	target, err := c.snapshot.ReadFile(ctx, toPath)
+	if err != nil {
+		return nil, err
+	}
+	sourcePF, err := parseOne(sym.Location.URI, src)
+	if err != nil {
+		return nil, err
+	}
+	targetPF, err := parseOne(toPath, target)
+	if err != nil {
+		return nil, err
+	}
+	movedQualifiers := selectorQualifierNames(sourceText)
+	if len(movedQualifiers) == 0 {
+		return nil, nil
+	}
+	deleteRange := deleteRangeForSymbol(src, sym)
+	remaining := append([]byte(nil), src[:deleteRange.Start.Offset]...)
+	remaining = append(remaining, src[deleteRange.End.Offset:]...)
+	remainingQualifiers := selectorQualifierNames(string(remaining))
+
+	var targetImports []importNeed
+	var sourceRemovals []TextEdit
+	for _, imp := range sourcePF.file.Imports {
+		importPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return nil, err
+		}
+		alias := importAlias(imp)
+		local := importLocalName(importPath, alias)
+		if local == "" || !movedQualifiers[local] {
+			continue
+		}
+		if findImportSpec(targetPF, importPath, alias) == nil {
+			targetImports = append(targetImports, importNeed{path: importPath, alias: alias})
+		}
+		if !remainingQualifiers[local] {
+			sourceRemovals = append(sourceRemovals, TextEdit{
+				Path:        sym.Location.URI,
+				Range:       removeImportRange(sourcePF, imp),
+				Replacement: "",
+			})
+		}
+	}
+	var out []FileEdit
+	if len(targetImports) > 0 {
+		edit, err := ensureImportsEdit(targetPF, targetImports)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, FileEdit{Path: toPath, Edits: []TextEdit{edit}})
+	}
+	if len(sourceRemovals) > 0 {
+		out = append(out, FileEdit{Path: sym.Location.URI, Edits: sourceRemovals})
+	}
+	return out, nil
+}
+
+type importNeed struct {
+	path  string
+	alias string
+}
+
+func importLocalName(importPath, alias string) string {
+	if alias == "." || alias == "_" {
+		return ""
+	}
+	if alias != "" {
+		return alias
+	}
+	importPath = strings.TrimRight(importPath, "/")
+	if i := strings.LastIndexByte(importPath, '/'); i >= 0 {
+		importPath = importPath[i+1:]
+	}
+	if !isValidIdentifier(importPath) {
+		return ""
+	}
+	return importPath
+}
+
+func selectorQualifierNames(src string) map[string]bool {
+	fset := token.NewFileSet()
+	parseSrc := src
+	if !strings.HasPrefix(strings.TrimSpace(src), "package ") {
+		parseSrc = "package snippet\n\n" + src
+	}
+	file, err := parser.ParseFile(fset, "snippet.go", parseSrc, 0)
+	if err != nil {
+		return identifierSet(src)
+	}
+	out := map[string]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if ok {
+			out[id.Name] = true
+		}
+		return true
+	})
+	return out
+}
+
+func identifierSet(src string) map[string]bool {
+	out := map[string]bool{}
+	for i := 0; i < len(src); {
+		r, size := rune(src[i]), 1
+		if r >= utf8.RuneSelf {
+			r, size = utf8.DecodeRuneInString(src[i:])
+		}
+		if r != '_' && !unicode.IsLetter(r) {
+			i += size
+			continue
+		}
+		start := i
+		for i < len(src) {
+			r = rune(src[i])
+			size = 1
+			if r >= utf8.RuneSelf {
+				r, size = utf8.DecodeRuneInString(src[i:])
+			}
+			if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				break
+			}
+			i += size
+		}
+		out[src[start:i]] = true
+	}
+	return out
 }
 
 func ensureTrailingNewline(s string) string {
@@ -660,17 +1346,37 @@ func parseOne(p string, src []byte) (parsedFile, error) {
 }
 
 func ensureImportEdit(pf parsedFile, importPath, alias string) (TextEdit, error) {
-	if err := validateImportAlias(alias); err != nil {
-		return TextEdit{}, err
+	return ensureImportsEdit(pf, []importNeed{{path: importPath, alias: alias}})
+}
+
+func ensureImportsEdit(pf parsedFile, imports []importNeed) (TextEdit, error) {
+	specs := make([]string, 0, len(imports))
+	seen := map[string]bool{}
+	for _, imp := range imports {
+		if err := validateImportAlias(imp.alias); err != nil {
+			return TextEdit{}, err
+		}
+		key := imp.alias + "\x00" + imp.path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		specs = append(specs, formatImportSpec(imp.path, imp.alias))
 	}
-	spec := formatImportSpec(importPath, alias)
+	if len(specs) == 0 {
+		return TextEdit{}, errors.New("editor: no imports to ensure")
+	}
 	decls := importDecls(pf)
 	if len(decls) == 0 {
 		offset := pf.fset.Position(pf.file.Name.End()).Offset
+		replacement := "\n\nimport " + specs[0]
+		if len(specs) > 1 {
+			replacement = "\n\nimport (\n\t" + strings.Join(specs, "\n\t") + "\n)"
+		}
 		return TextEdit{
 			Path:        pf.path,
 			Range:       Range{Start: Position{Offset: offset}, End: Position{Offset: offset}},
-			Replacement: "\n\nimport " + spec,
+			Replacement: replacement,
 		}, nil
 	}
 	gen := decls[len(decls)-1]
@@ -679,14 +1385,14 @@ func ensureImportEdit(pf parsedFile, importPath, alias string) (TextEdit, error)
 		return TextEdit{
 			Path:        pf.path,
 			Range:       Range{Start: Position{Offset: offset}, End: Position{Offset: offset}},
-			Replacement: "\n\t" + spec,
+			Replacement: "\n\t" + strings.Join(specs, "\n\t"),
 		}, nil
 	}
 	if len(gen.Specs) != 1 {
 		return TextEdit{}, errors.New("editor: malformed import declaration")
 	}
 	existing := strings.TrimSpace(sourceSlice(pf.src, pf.fset, gen.Specs[0].Pos(), gen.Specs[0].End()))
-	replacement := "import (\n\t" + existing + "\n\t" + spec + "\n)"
+	replacement := "import (\n\t" + existing + "\n\t" + strings.Join(specs, "\n\t") + "\n)"
 	return TextEdit{
 		Path:        pf.path,
 		Range:       rangeOf(pf.fset, gen.Pos(), gen.End()),

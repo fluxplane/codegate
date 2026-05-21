@@ -883,6 +883,274 @@ func Run() {}
 	}
 }
 
+func TestMoveSymbolReconcilesImports(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"from.go": `package demo
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+func Keep() string {
+	return strings.TrimSpace(" keep ")
+}
+
+func MoveMe(values []string) string {
+	sort.Strings(values)
+	return fmt.Sprint(values)
+}
+`,
+		"to.go": `package demo
+
+func Existing() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, MoveSymbol{
+		Target:           SymbolSelector{Name: "MoveMe", Kind: SymbolFunction},
+		ToPath:           "to.go",
+		ReconcileImports: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	fromAfter := string(got["from.go"].After)
+	toAfter := string(got["to.go"].After)
+	if strings.Contains(fromAfter, `"fmt"`) || strings.Contains(fromAfter, `"sort"`) || !strings.Contains(fromAfter, `"strings"`) {
+		t.Fatalf("source imports were not reconciled:\n%s", fromAfter)
+	}
+	if !strings.Contains(toAfter, `"fmt"`) || !strings.Contains(toAfter, `"sort"`) || !strings.Contains(toAfter, "func MoveMe") {
+		t.Fatalf("target import/function move failed:\n%s", toAfter)
+	}
+}
+
+func TestGoParameterOperationsUpdateDeclarationsAndCalls(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"a.go": `package demo
+
+func Target(name string) string {
+	return name
+}
+
+func Caller() {
+	_ = Target("a")
+}
+`,
+		"b.go": `package demo
+
+func Other() {
+	_ = Target("b")
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, AddGoParameter{
+		Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Name:         "active",
+		Type:         "bool",
+		DefaultValue: "true",
+		Position:     1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	if !strings.Contains(string(got["a.go"].After), "func Target(name string, active bool) string") || !strings.Contains(string(got["a.go"].After), `Target("a", true)`) {
+		t.Fatalf("add parameter did not update declaration and same-file call:\n%s", got["a.go"].After)
+	}
+	if !strings.Contains(string(got["b.go"].After), `Target("b", true)`) {
+		t.Fatalf("add parameter did not update cross-file call:\n%s", got["b.go"].After)
+	}
+
+	if err := changes.Apply(ctx, RemoveGoParameter{
+		Target: SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		Name:   "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got = changedFilesByPath(mustFiles(t, changes, ctx))
+	if strings.Contains(string(got["a.go"].After), "active bool") || strings.Contains(string(got["a.go"].After), `Target("a", true)`) {
+		t.Fatalf("remove parameter did not update declaration and call:\n%s", got["a.go"].After)
+	}
+	if strings.Contains(string(got["b.go"].After), `Target("b", true)`) {
+		t.Fatalf("remove parameter did not update cross-file call:\n%s", got["b.go"].After)
+	}
+}
+
+func TestRenameGoParameterUpdatesBodyReferences(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Target(name string) string {
+	value := name
+	return value + name
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameGoParameter{
+		Target:  SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		OldName: "name",
+		NewName: "label",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if !strings.Contains(after, "func Target(label string) string") || strings.Contains(after, " name") || !strings.Contains(after, "value := label") || !strings.Contains(after, "value + label") {
+		t.Fatalf("parameter rename failed:\n%s", after)
+	}
+}
+
+func TestRemoveGoParameterHandlesGroupedNames(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+func Grouped(first, second string, count int) {}
+
+func Caller() {
+	Grouped("a", "b", 1)
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RemoveGoParameter{
+		Target: SymbolSelector{Name: "Grouped", Kind: SymbolFunction},
+		Name:   "second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if !strings.Contains(after, "func Grouped(first string, count int)") || !strings.Contains(after, `Grouped("a", 1)`) || strings.Contains(after, "second") {
+		t.Fatalf("grouped parameter removal failed:\n%s", after)
+	}
+}
+
+func TestGoStructFieldOperations(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"user.go": `package demo
+
+type User struct {
+	Name string
+	First, Last string
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, AddGoStructField{
+		Struct:   SymbolSelector{Name: "User", Kind: SymbolStruct},
+		Name:     "Email",
+		Type:     "string",
+		Tag:      `json:"email"`,
+		Comment:  "Email stores the primary address.",
+		Position: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, RemoveGoStructField{
+		Struct: SymbolSelector{Name: "User", Kind: SymbolStruct},
+		Field:  "Last",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	if !strings.Contains(after, "Name string") || strings.Contains(after, "Last") || !strings.Contains(after, "First string") || !strings.Contains(after, "Email string `json:\"email\"`") || !strings.Contains(after, "// Email stores the primary address.") {
+		t.Fatalf("struct field operations failed:\n%s", after)
+	}
+}
+
+func TestRemoveGoStructFieldRejectsReferencedField(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"user.go": `package demo
+
+type User struct {
+	Email string
+}
+
+func Use(user User) string {
+	return user.Email
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	err := changes.Apply(ctx, RemoveGoStructField{
+		Struct: SymbolSelector{Name: "User", Kind: SymbolStruct},
+		Field:  "Email",
+	})
+	if err == nil {
+		t.Fatal("expected referenced field removal to fail")
+	}
+	if !strings.Contains(err.Error(), "indexed references") {
+		t.Fatalf("expected reference error, got %v", err)
+	}
+}
+
+func TestExtractGoFunctionAndMethod(t *testing.T) {
+	ctx := context.Background()
+	src := `package demo
+
+import "strings"
+
+type User struct {
+	Name string
+}
+
+func Run(name string) string {
+	return strings.TrimSpace(name)
+}
+
+func (u User) Label() string {
+	return u.Name
+}
+`
+	ed := newTestEditor(t, map[string]string{"demo.go": src})
+	changes := ed.NewChangeSet()
+	extractFuncStart := offsetOf(t, src, "return strings.TrimSpace(name)")
+	extractFuncEnd := extractFuncStart + len("return strings.TrimSpace(name)")
+	if err := changes.Apply(ctx, ExtractGoFunction{
+		Path:            "demo.go",
+		Range:           Range{Start: Position{Offset: extractFuncStart}, End: Position{Offset: extractFuncEnd}},
+		Name:            "Normalize",
+		Params:          "name string",
+		Results:         "string",
+		ReplaceWithCall: "return Normalize(name)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterFirst := string(mustFiles(t, changes, ctx)[0].After)
+	extractMethodStart := offsetOf(t, afterFirst, "return u.Name")
+	extractMethodEnd := extractMethodStart + len("return u.Name")
+	if err := changes.Apply(ctx, ExtractGoMethod{
+		Path:            "demo.go",
+		Range:           Range{Start: Position{Offset: extractMethodStart}, End: Position{Offset: extractMethodEnd}},
+		Receiver:        "u User",
+		Name:            "NameValue",
+		Results:         "string",
+		ReplaceWithCall: "return u.NameValue()",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := string(mustFiles(t, changes, ctx)[0].After)
+	for _, want := range []string{
+		"return Normalize(name)",
+		"func Normalize(name string) string",
+		"return strings.TrimSpace(name)",
+		"return u.NameValue()",
+		"func (u User) NameValue() string",
+		"return u.Name",
+	} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("extract output missing %q:\n%s", want, after)
+		}
+	}
+}
+
 func TestMetricsIncludeSymbolPressure(t *testing.T) {
 	ctx := context.Background()
 	ed := newTestEditor(t, map[string]string{

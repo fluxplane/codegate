@@ -413,6 +413,13 @@ const (
 	OpRemoveGoImport  OperationKind = "go_import_remove"
 	OpRenameGoImport  OperationKind = "go_import_rename"
 	OpMoveSymbol      OperationKind = "move_symbol"
+	OpAddGoParameter  OperationKind = "go_parameter_add"
+	OpRemoveGoParam   OperationKind = "go_parameter_remove"
+	OpRenameGoParam   OperationKind = "go_parameter_rename"
+	OpAddGoField      OperationKind = "go_struct_field_add"
+	OpRemoveGoField   OperationKind = "go_struct_field_remove"
+	OpExtractGoFunc   OperationKind = "go_function_extract"
+	OpExtractGoMethod OperationKind = "go_method_extract"
 )
 
 type TextEdit struct {
@@ -550,12 +557,86 @@ type RenameGoImport struct {
 func (RenameGoImport) Kind() OperationKind { return OpRenameGoImport }
 
 type MoveSymbol struct {
-	Target       SymbolSelector
-	ToPath       string
-	ExpectedHash string
+	Target           SymbolSelector
+	ToPath           string
+	ExpectedHash     string
+	ReconcileImports bool
 }
 
 func (MoveSymbol) Kind() OperationKind { return OpMoveSymbol }
+
+type AddGoParameter struct {
+	Target       SymbolSelector
+	Name         string
+	Type         string
+	DefaultValue string
+	Position     int
+	ExpectedHash string
+}
+
+func (AddGoParameter) Kind() OperationKind { return OpAddGoParameter }
+
+type RemoveGoParameter struct {
+	Target       SymbolSelector
+	Name         string
+	ExpectedHash string
+}
+
+func (RemoveGoParameter) Kind() OperationKind { return OpRemoveGoParam }
+
+type RenameGoParameter struct {
+	Target       SymbolSelector
+	OldName      string
+	NewName      string
+	ExpectedHash string
+}
+
+func (RenameGoParameter) Kind() OperationKind { return OpRenameGoParam }
+
+type AddGoStructField struct {
+	Struct       SymbolSelector
+	Name         string
+	Type         string
+	Tag          string
+	Comment      string
+	Position     int
+	ExpectedHash string
+}
+
+func (AddGoStructField) Kind() OperationKind { return OpAddGoField }
+
+type RemoveGoStructField struct {
+	Struct       SymbolSelector
+	Field        string
+	ExpectedHash string
+}
+
+func (RemoveGoStructField) Kind() OperationKind { return OpRemoveGoField }
+
+type ExtractGoFunction struct {
+	Path            string
+	Range           Range
+	Name            string
+	Params          string
+	Results         string
+	InsertAfter     SymbolSelector
+	ReplaceWithCall string
+}
+
+func (ExtractGoFunction) Kind() OperationKind { return OpExtractGoFunc }
+
+type ExtractGoMethod struct {
+	Path            string
+	Range           Range
+	Receiver        string
+	Name            string
+	Params          string
+	Results         string
+	InsertAfter     SymbolSelector
+	ReplaceWithCall string
+}
+
+func (ExtractGoMethod) Kind() OperationKind { return OpExtractGoMethod }
 
 type RefactorKind string
 
