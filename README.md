@@ -27,9 +27,10 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - best-effort implementation matching
   - package pressure metrics
 - Semantic Go edits through `ChangeSet`:
-  - replace or append functions
-  - delete symbols
+  - rename, replace, append, delete, and move symbols
+  - replace or append functions and methods
   - replace doc comments
+  - ensure, remove, or rename imports
   - ensure or remove struct tags
 - Unified diff preview before commit.
 - Refactoring proposals for simple AST-derived signals:
@@ -161,8 +162,8 @@ Supported today:
 - package discovery from `.go` files
 - declarations, references, direct calls, imports, and simple implementation edges
 - source reads by symbol or source position
-- deterministic edits for functions, comments, symbol deletion, and struct tags
-- metrics and AST-derived refactoring proposals
+- deterministic edits for symbols, functions, methods, imports, comments, moves, and struct tags
+- package and symbol metrics plus AST-derived refactoring proposals
 - agentruntime-style source integration through context-aware reads and workspace walks
 
 Current limitations:
@@ -183,7 +184,7 @@ Upcoming work:
 2. Add an explicit OS filesystem adapter for durable commits outside core.
 3. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 4. Improve field/write/read occurrence classification and dynamic call limitations.
-5. Add richer refactor operations such as rename symbol, update call sites, import rewrites, and move declarations.
+5. Improve import reconciliation for move operations.
 6. Add validation adapters for parse/typecheck/build/test workflows.
 7. Add another language backend, likely tree-sitter-backed, to prove the language-neutral model.
 

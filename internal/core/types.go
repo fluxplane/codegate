@@ -409,6 +409,10 @@ const (
 	OpReplaceComment  OperationKind = "replace_comment"
 	OpEnsureStructTag OperationKind = "go_struct_tag_ensure"
 	OpRemoveStructTag OperationKind = "go_struct_tag_remove"
+	OpEnsureGoImport  OperationKind = "go_import_ensure"
+	OpRemoveGoImport  OperationKind = "go_import_remove"
+	OpRenameGoImport  OperationKind = "go_import_rename"
+	OpMoveSymbol      OperationKind = "move_symbol"
 )
 
 type TextEdit struct {
@@ -430,6 +434,14 @@ type ReplaceFunction struct {
 
 func (ReplaceFunction) Kind() OperationKind { return OpReplaceFunction }
 
+type ReplaceSymbol struct {
+	Target       SymbolSelector
+	Source       string
+	ExpectedHash string
+}
+
+func (ReplaceSymbol) Kind() OperationKind { return OpReplaceSymbol }
+
 type RenameSymbol struct {
 	Target       SymbolSelector
 	NewName      string
@@ -446,12 +458,42 @@ type AppendFunction struct {
 
 func (AppendFunction) Kind() OperationKind { return OpAppendFunction }
 
+type AppendSymbol struct {
+	Path   string
+	UnitID string
+	Source string
+}
+
+func (AppendSymbol) Kind() OperationKind { return OpAppendSymbol }
+
 type DeleteSymbol struct {
 	Target       SymbolSelector
 	ExpectedHash string
 }
 
 func (DeleteSymbol) Kind() OperationKind { return OpDeleteSymbol }
+
+type DeleteFunction struct {
+	Target       SymbolSelector
+	ExpectedHash string
+}
+
+func (DeleteFunction) Kind() OperationKind { return OpDeleteFunction }
+
+type ReplaceMethod struct {
+	Target       SymbolSelector
+	Source       string
+	ExpectedHash string
+}
+
+func (ReplaceMethod) Kind() OperationKind { return OpReplaceMethod }
+
+type DeleteMethod struct {
+	Target       SymbolSelector
+	ExpectedHash string
+}
+
+func (DeleteMethod) Kind() OperationKind { return OpDeleteMethod }
 
 type ReplaceComment struct {
 	Target       SymbolSelector
@@ -479,6 +521,41 @@ type RemoveGoStructTag struct {
 }
 
 func (RemoveGoStructTag) Kind() OperationKind { return OpRemoveStructTag }
+
+type EnsureGoImport struct {
+	Path       string
+	UnitID     string
+	ImportPath string
+	Alias      string
+}
+
+func (EnsureGoImport) Kind() OperationKind { return OpEnsureGoImport }
+
+type RemoveGoImport struct {
+	Path       string
+	UnitID     string
+	ImportPath string
+	Alias      string
+}
+
+func (RemoveGoImport) Kind() OperationKind { return OpRemoveGoImport }
+
+type RenameGoImport struct {
+	Path       string
+	UnitID     string
+	ImportPath string
+	Alias      string
+}
+
+func (RenameGoImport) Kind() OperationKind { return OpRenameGoImport }
+
+type MoveSymbol struct {
+	Target       SymbolSelector
+	ToPath       string
+	ExpectedHash string
+}
+
+func (MoveSymbol) Kind() OperationKind { return OpMoveSymbol }
 
 type RefactorKind string
 

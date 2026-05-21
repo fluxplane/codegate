@@ -678,6 +678,211 @@ type (
 	}
 }
 
+func TestReplaceAndAppendSymbolWrappers(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"a.go": `package demo
+
+type User struct{}
+`,
+		"b.go": `package demo
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx,
+		ReplaceSymbol{
+			Target: SymbolSelector{Name: "User", Kind: SymbolStruct},
+			Source: "type Account struct{}",
+		},
+		AppendSymbol{
+			UnitID: "demo",
+			Source: "const Added = 1",
+		},
+		AppendSymbol{
+			Path:   "b.go",
+			Source: "var Other = 2",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	if !strings.Contains(string(got["a.go"].After), "type Account struct{}") || !strings.Contains(string(got["a.go"].After), "const Added = 1") {
+		t.Fatalf("a.go wrapper edits failed:\n%s", got["a.go"].After)
+	}
+	if !strings.Contains(string(got["b.go"].After), "var Other = 2") {
+		t.Fatalf("b.go append failed:\n%s", got["b.go"].After)
+	}
+}
+
+func TestMethodAndFunctionWrappersEnforceKinds(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"demo.go": `package demo
+
+type Store struct{}
+
+func Target() {}
+
+func (Store) Load() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ReplaceMethod{
+		Target: SymbolSelector{Name: "Load", Container: "Store"},
+		Source: "func (Store) Fetch() {}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, DeleteFunction{Target: SymbolSelector{Name: "Target"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, DeleteMethod{Target: SymbolSelector{Name: "Fetch", Container: "Store"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := changes.Apply(ctx, ReplaceMethod{Target: SymbolSelector{Name: "Target", Kind: SymbolFunction}, Source: "func Target() {}"}); err == nil {
+		t.Fatal("expected ReplaceMethod to reject function kind")
+	}
+}
+
+func TestGoImportEdits(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"empty.go": `package demo
+
+func A() {}
+`,
+		"single.go": `package demo
+
+import "fmt"
+
+func B() {}
+`,
+		"group.go": `package demo
+
+import (
+	"fmt"
+	alias "strings"
+)
+
+func C() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx,
+		EnsureGoImport{Path: "empty.go", ImportPath: "strings"},
+		EnsureGoImport{Path: "single.go", ImportPath: "strings"},
+		EnsureGoImport{Path: "single.go", ImportPath: "strings"},
+		RemoveGoImport{Path: "group.go", ImportPath: "fmt"},
+		RenameGoImport{Path: "group.go", ImportPath: "strings", Alias: "textstrings"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	if !strings.Contains(string(got["empty.go"].After), `import "strings"`) {
+		t.Fatalf("empty import insert failed:\n%s", got["empty.go"].After)
+	}
+	if strings.Count(string(got["single.go"].After), `"strings"`) != 1 || !strings.Contains(string(got["single.go"].After), "import (") {
+		t.Fatalf("single import ensure failed:\n%s", got["single.go"].After)
+	}
+	groupAfter := string(got["group.go"].After)
+	if strings.Contains(groupAfter, `"fmt"`) || !strings.Contains(groupAfter, `textstrings "strings"`) {
+		t.Fatalf("group import remove/rename failed:\n%s", groupAfter)
+	}
+}
+
+func TestGoImportEditsByUnit(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"a/a.go": `package a
+
+func A() {}
+`,
+		"a/b.go": `package a
+
+func B() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, EnsureGoImport{UnitID: "a#a", ImportPath: "fmt"}); err != nil {
+		t.Fatal(err)
+	}
+	files := mustFiles(t, changes, ctx)
+	if len(files) != 1 || files[0].Path != "a/a.go" || !strings.Contains(string(files[0].After), `import "fmt"`) {
+		t.Fatalf("unit import edit should target first sorted unit file: %#v", files)
+	}
+}
+
+func TestMoveSymbolMovesFunctionAndType(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"from.go": `package demo
+
+const (
+	Keep = 1
+	MoveMe = 2
+)
+
+func Run() string {
+	return "ok"
+}
+`,
+		"to.go": `package demo
+
+func Existing() {}
+`,
+	})
+	fragment, err := ed.ReadSymbol(ctx, SymbolSelector{Name: "Run", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx,
+		MoveSymbol{Target: SymbolSelector{ID: fragment.Symbol.ID}, ToPath: "to.go", ExpectedHash: fragment.Hash},
+		MoveSymbol{Target: SymbolSelector{Name: "MoveMe", Kind: SymbolConst}, ToPath: "to.go"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(mustFiles(t, changes, ctx))
+	fromAfter := string(got["from.go"].After)
+	toAfter := string(got["to.go"].After)
+	if strings.Contains(fromAfter, "func Run") || strings.Contains(fromAfter, "MoveMe") || !strings.Contains(fromAfter, "Keep = 1") {
+		t.Fatalf("source move edits failed:\n%s", fromAfter)
+	}
+	if !strings.Contains(toAfter, "func Run() string") || !strings.Contains(toAfter, "MoveMe = 2") {
+		t.Fatalf("target move edits failed:\n%s", toAfter)
+	}
+}
+
+func TestMoveSymbolRejectsStaleAndUnsupported(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"from.go": `package demo
+
+type User struct {
+	Email string
+}
+
+func Run() {}
+`,
+		"to.go": `package demo
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, MoveSymbol{Target: SymbolSelector{Name: "Run", Kind: SymbolFunction}, ToPath: "to.go", ExpectedHash: "stale"}); err == nil {
+		t.Fatal("expected stale move to fail")
+	}
+	if err := changes.Apply(ctx, MoveSymbol{Target: SymbolSelector{Name: "Email", Kind: SymbolField}, ToPath: "to.go"}); err == nil {
+		t.Fatal("expected field move to fail")
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("rejected moves should not change files: %#v", files)
+	}
+}
+
 func TestMetricsIncludeSymbolPressure(t *testing.T) {
 	ctx := context.Background()
 	ed := newTestEditor(t, map[string]string{
@@ -1144,6 +1349,15 @@ func changedFilesByPath(files []ChangedFile) map[string]ChangedFile {
 		out[file.Path] = file
 	}
 	return out
+}
+
+func mustFiles(t *testing.T, changes *ChangeSet, ctx context.Context) []ChangedFile {
+	t.Helper()
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 func TestGoParserPackagesOnlyLiveInGoBackend(t *testing.T) {

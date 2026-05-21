@@ -33,12 +33,21 @@ type (
 	FileEdit          = core.FileEdit
 	TextEdit          = core.TextEdit
 	ReplaceFunction   = core.ReplaceFunction
+	ReplaceSymbol     = core.ReplaceSymbol
 	RenameSymbol      = core.RenameSymbol
 	AppendFunction    = core.AppendFunction
+	AppendSymbol      = core.AppendSymbol
 	DeleteSymbol      = core.DeleteSymbol
+	DeleteFunction    = core.DeleteFunction
+	ReplaceMethod     = core.ReplaceMethod
+	DeleteMethod      = core.DeleteMethod
 	ReplaceComment    = core.ReplaceComment
 	EnsureGoStructTag = core.EnsureGoStructTag
 	RemoveGoStructTag = core.RemoveGoStructTag
+	EnsureGoImport    = core.EnsureGoImport
+	RemoveGoImport    = core.RemoveGoImport
+	RenameGoImport    = core.RenameGoImport
+	MoveSymbol        = core.MoveSymbol
 	Proposal          = core.Proposal
 )
 
@@ -94,4 +103,8 @@ const (
 	OpReplaceComment  = core.OpReplaceComment
 	OpEnsureStructTag = core.OpEnsureStructTag
 	OpRemoveStructTag = core.OpRemoveStructTag
+	OpEnsureGoImport  = core.OpEnsureGoImport
+	OpRemoveGoImport  = core.OpRemoveGoImport
+	OpRenameGoImport  = core.OpRenameGoImport
+	OpMoveSymbol      = core.OpMoveSymbol
 )
