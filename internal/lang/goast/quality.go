@@ -5,18 +5,23 @@ import (
 	"go/ast"
 	"go/token"
 	"path"
+	"sort"
 	"strings"
 )
 
 const (
-	goComplexityThreshold      = 10
-	goNestingThreshold         = 4
-	goFunctionLOCThreshold     = 80
-	goParameterCountThreshold  = 5
-	goReturnCountThreshold     = 5
-	goFileLOCThreshold         = 500
-	goStructFieldThreshold     = 20
-	goInterfaceMethodThreshold = 8
+	goComplexityThreshold        = 10
+	goNestingThreshold           = 4
+	goFunctionLOCThreshold       = 80
+	goParameterCountThreshold    = 5
+	goReturnCountThreshold       = 5
+	goFileLOCThreshold           = 500
+	goStructFieldThreshold       = 20
+	goInterfaceMethodThreshold   = 8
+	goDocCoverageThreshold       = 80
+	goTestToCodeRatioThreshold   = 10
+	goBranchDensityThreshold     = 120
+	goGeneratedLOCPercentWarning = 25
 )
 
 type goQualityReport struct {
@@ -30,11 +35,29 @@ type goQualityMetrics struct {
 	MaxFunctionLOC              int
 	LargeFunctionCount          int
 	HighComplexityFunctionCount int
+	TotalBranchCount            int
+	TotalNonCommentLOC          int
+	GeneratedLOC                int
+	CodeLOC                     int
+	TestLOC                     int
+	TestFileCount               int
+	TestFunctionCount           int
+	TableTestCount              int
+	FlakyTestSmellCount         int
+	TotalSymbolCount            int
+	ExportedSymbolCount         int
+	DocumentedExportCount       int
+	UndocumentedExportCount     int
+	WeakPackageNameCount        int
+	WeakIdentifierCount         int
+	WeakPackageUnits            map[string]bool
 	IgnoredErrorCount           int
 	UncheckedTypeAssertionCount int
 	DeferInLoopCount            int
 	ProcessExitCount            int
 	StringConcatInLoopCount     int
+	PackageLOC                  map[string]int
+	PackageFileCount            map[string]int
 }
 
 type goFunctionQuality struct {
@@ -54,20 +77,136 @@ func (r *goQualityReport) merge(next goQualityReport) {
 	r.metrics.MaxFunctionLOC = maxInt(r.metrics.MaxFunctionLOC, next.metrics.MaxFunctionLOC)
 	r.metrics.LargeFunctionCount += next.metrics.LargeFunctionCount
 	r.metrics.HighComplexityFunctionCount += next.metrics.HighComplexityFunctionCount
+	r.metrics.TotalBranchCount += next.metrics.TotalBranchCount
+	r.metrics.TotalNonCommentLOC += next.metrics.TotalNonCommentLOC
+	r.metrics.GeneratedLOC += next.metrics.GeneratedLOC
+	r.metrics.CodeLOC += next.metrics.CodeLOC
+	r.metrics.TestLOC += next.metrics.TestLOC
+	r.metrics.TestFileCount += next.metrics.TestFileCount
+	r.metrics.TestFunctionCount += next.metrics.TestFunctionCount
+	r.metrics.TableTestCount += next.metrics.TableTestCount
+	r.metrics.FlakyTestSmellCount += next.metrics.FlakyTestSmellCount
+	r.metrics.TotalSymbolCount += next.metrics.TotalSymbolCount
+	r.metrics.ExportedSymbolCount += next.metrics.ExportedSymbolCount
+	r.metrics.DocumentedExportCount += next.metrics.DocumentedExportCount
+	r.metrics.UndocumentedExportCount += next.metrics.UndocumentedExportCount
+	r.metrics.WeakIdentifierCount += next.metrics.WeakIdentifierCount
 	r.metrics.IgnoredErrorCount += next.metrics.IgnoredErrorCount
 	r.metrics.UncheckedTypeAssertionCount += next.metrics.UncheckedTypeAssertionCount
 	r.metrics.DeferInLoopCount += next.metrics.DeferInLoopCount
 	r.metrics.ProcessExitCount += next.metrics.ProcessExitCount
 	r.metrics.StringConcatInLoopCount += next.metrics.StringConcatInLoopCount
+	mergeBoolMaps(&r.metrics.WeakPackageUnits, next.metrics.WeakPackageUnits)
+	mergeIntMaps(&r.metrics.PackageLOC, next.metrics.PackageLOC)
+	mergeIntMaps(&r.metrics.PackageFileCount, next.metrics.PackageFileCount)
+}
+
+func (r *goQualityReport) finalize(includeTests bool) {
+	r.metrics.WeakPackageNameCount = len(r.metrics.WeakPackageUnits)
+	for _, unit := range sortedBoolMapKeys(r.metrics.WeakPackageUnits) {
+		r.findings = append(r.findings, Finding{
+			Kind:     "quality_weak_package_name",
+			Severity: "info",
+			Package:  unit,
+			Symbol:   path.Base(packageDir(unit)),
+			Reason:   fmt.Sprintf("Package path segment %q is too vague for agents to infer ownership.", path.Base(packageDir(unit))),
+			Evidence: []Evidence{{Kind: "quality_weak_package_name", Metrics: map[string]float64{"count": 1}}},
+		})
+	}
+	m := r.metrics
+	if m.ExportedSymbolCount > 0 {
+		docCoverage := percent(m.DocumentedExportCount, m.ExportedSymbolCount)
+		if docCoverage < goDocCoverageThreshold {
+			r.findings = append(r.findings, Finding{
+				Kind:     "quality_low_doc_coverage",
+				Severity: "info",
+				Reason:   fmt.Sprintf("Exported API doc coverage is %d%%; agents rely on comments to infer safe changes.", docCoverage),
+				Evidence: []Evidence{{Kind: "quality_low_doc_coverage", Metrics: map[string]float64{"coverage_percent": float64(docCoverage), "threshold": goDocCoverageThreshold}}},
+			})
+		}
+	}
+	if m.TotalNonCommentLOC > 0 {
+		branchDensity := m.TotalBranchCount * 1000 / m.TotalNonCommentLOC
+		if branchDensity > goBranchDensityThreshold {
+			r.findings = append(r.findings, Finding{
+				Kind:     "quality_high_branch_density",
+				Severity: "info",
+				Reason:   fmt.Sprintf("Branch density is %d per KLOC; review control-flow complexity.", branchDensity),
+				Evidence: []Evidence{{Kind: "quality_high_branch_density", Metrics: map[string]float64{"branch_density_per_kloc": float64(branchDensity), "threshold": goBranchDensityThreshold}}},
+			})
+		}
+		generatedPercent := percent(m.GeneratedLOC, m.TotalNonCommentLOC)
+		if generatedPercent > goGeneratedLOCPercentWarning {
+			r.findings = append(r.findings, Finding{
+				Kind:     "quality_high_generated_ratio",
+				Severity: "info",
+				Reason:   fmt.Sprintf("Generated code is %d%% of indexed non-comment LOC.", generatedPercent),
+				Evidence: []Evidence{{Kind: "quality_high_generated_ratio", Metrics: map[string]float64{"generated_loc_percent": float64(generatedPercent), "threshold": goGeneratedLOCPercentWarning}}},
+			})
+		}
+	}
+	if includeTests && m.CodeLOC > 0 {
+		testRatio := percent(m.TestLOC, m.CodeLOC)
+		if m.TestFunctionCount == 0 {
+			r.findings = append(r.findings, Finding{
+				Kind:     "coverage_no_go_tests",
+				Severity: "warning",
+				Reason:   "No Go test functions were indexed for the selected scope.",
+				Evidence: []Evidence{{Kind: "coverage_no_go_tests", Metrics: map[string]float64{"test_functions": 0}}},
+			})
+		} else if testRatio < goTestToCodeRatioThreshold {
+			r.findings = append(r.findings, Finding{
+				Kind:     "coverage_low_test_to_code_ratio",
+				Severity: "info",
+				Reason:   fmt.Sprintf("Go test/code LOC ratio is %d%%.", testRatio),
+				Evidence: []Evidence{{Kind: "coverage_low_test_to_code_ratio", Metrics: map[string]float64{"test_to_code_ratio": float64(testRatio), "threshold": goTestToCodeRatioThreshold}}},
+			})
+		}
+	}
 }
 
 func (m goQualityMetrics) assessmentMetrics() map[string]interface{} {
+	exportedRatio := 0
+	if m.TotalSymbolCount > 0 {
+		exportedRatio = percent(m.ExportedSymbolCount, m.TotalSymbolCount)
+	}
+	docCoverage := 100
+	if m.ExportedSymbolCount > 0 {
+		docCoverage = percent(m.DocumentedExportCount, m.ExportedSymbolCount)
+	}
+	testRatio := 0
+	if m.CodeLOC > 0 {
+		testRatio = percent(m.TestLOC, m.CodeLOC)
+	}
+	branchDensity := 0
+	if m.TotalNonCommentLOC > 0 {
+		branchDensity = m.TotalBranchCount * 1000 / m.TotalNonCommentLOC
+	}
+	generatedPercent := 0
+	if m.TotalNonCommentLOC > 0 {
+		generatedPercent = percent(m.GeneratedLOC, m.TotalNonCommentLOC)
+	}
 	return map[string]interface{}{
 		"max_cyclomatic_complexity":      m.MaxCyclomaticComplexity,
 		"max_nesting_depth":              m.MaxNestingDepth,
 		"max_function_loc":               m.MaxFunctionLOC,
 		"large_function_count":           m.LargeFunctionCount,
 		"high_complexity_function_count": m.HighComplexityFunctionCount,
+		"package_loc":                    m.PackageLOC,
+		"package_file_count":             m.PackageFileCount,
+		"exported_symbol_count":          m.ExportedSymbolCount,
+		"exported_ratio":                 exportedRatio,
+		"branch_density_per_kloc":        branchDensity,
+		"generated_loc_percent":          generatedPercent,
+		"doc_coverage_percent":           docCoverage,
+		"undocumented_export_count":      m.UndocumentedExportCount,
+		"test_file_count":                m.TestFileCount,
+		"test_function_count":            m.TestFunctionCount,
+		"test_to_code_ratio":             testRatio,
+		"table_test_count":               m.TableTestCount,
+		"flaky_test_smell_count":         m.FlakyTestSmellCount,
+		"weak_package_name_count":        m.WeakPackageNameCount,
+		"weak_identifier_count":          m.WeakIdentifierCount,
 		"ignored_error_count":            m.IgnoredErrorCount,
 		"unchecked_type_assertion_count": m.UncheckedTypeAssertionCount,
 		"defer_in_loop_count":            m.DeferInLoopCount,
@@ -77,15 +216,20 @@ func (m goQualityMetrics) assessmentMetrics() map[string]interface{} {
 }
 
 func collectGoQuality(pf parsedFile) goQualityReport {
-	if isVendorPath(pf.path) || isGeneratedGoSource(pf.src) {
+	if isVendorPath(pf.path) {
 		return goQualityReport{}
 	}
 	collector := goQualityCollector{
 		pf:          pf,
 		commentLine: commentLineSet(pf.fset, pf.file),
 		imports:     importAliases(pf.file),
+		generated:   isGeneratedGoSource(pf.src),
+		testFile:    isGoTestPath(pf.path),
 	}
 	collector.collectFile()
+	if collector.generated {
+		return collector.report
+	}
 	collector.collectDeclarations()
 	collector.collectFunctionSmells()
 	return collector.report
@@ -95,11 +239,31 @@ type goQualityCollector struct {
 	pf          parsedFile
 	commentLine map[int]bool
 	imports     map[string]string
+	generated   bool
+	testFile    bool
 	report      goQualityReport
 }
 
 func (c *goQualityCollector) collectFile() {
 	loc := nonCommentLOC(c.pf.src, c.commentLine, 0, len(c.pf.src))
+	c.report.metrics.TotalNonCommentLOC += loc
+	c.addPackageMetric(loc)
+	if c.generated {
+		c.report.metrics.GeneratedLOC += loc
+		return
+	}
+	if c.testFile {
+		c.report.metrics.TestLOC += loc
+		c.report.metrics.TestFileCount++
+	} else {
+		c.report.metrics.CodeLOC += loc
+	}
+	if weakName(path.Base(packageDir(c.pf.unit))) {
+		if c.report.metrics.WeakPackageUnits == nil {
+			c.report.metrics.WeakPackageUnits = map[string]bool{}
+		}
+		c.report.metrics.WeakPackageUnits[c.pf.unit] = true
+	}
 	if loc <= goFileLOCThreshold {
 		return
 	}
@@ -108,16 +272,94 @@ func (c *goQualityCollector) collectFile() {
 		map[string]float64{"loc": float64(loc), "threshold": goFileLOCThreshold})
 }
 
+func (c *goQualityCollector) addPackageMetric(loc int) {
+	if c.report.metrics.PackageLOC == nil {
+		c.report.metrics.PackageLOC = map[string]int{}
+	}
+	if c.report.metrics.PackageFileCount == nil {
+		c.report.metrics.PackageFileCount = map[string]int{}
+	}
+	c.report.metrics.PackageLOC[c.pf.unit] += loc
+	c.report.metrics.PackageFileCount[c.pf.unit]++
+}
+
 func (c *goQualityCollector) collectDeclarations() {
 	for _, decl := range c.pf.file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
+			c.collectFunctionDeclarationQuality(d)
 			q := c.functionQuality(d)
 			c.recordFunctionQuality(q)
 		case *ast.GenDecl:
+			c.collectGenDeclarationQuality(d)
 			c.collectTypeQuality(d)
 		}
 	}
+}
+
+func (c *goQualityCollector) collectFunctionDeclarationQuality(fn *ast.FuncDecl) {
+	if !c.testFile {
+		c.report.metrics.TotalSymbolCount++
+	}
+	c.collectExportDoc(fn.Name, fn.Doc, Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, fn.Name.Pos(), fn.Name.End())}, fn.Name.Name)
+	if c.testFile && c.isRunnableGoTestFunction(fn) {
+		c.report.metrics.TestFunctionCount++
+		if functionUsesTablePattern(fn) {
+			c.report.metrics.TableTestCount++
+		}
+	}
+	if !c.testFile && isExported(fn.Name.Name) && weakName(fn.Name.Name) {
+		c.report.metrics.WeakIdentifierCount++
+		c.addFinding("quality_weak_identifier_name", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, fn.Name.Pos(), fn.Name.End())}, fn.Name.Name,
+			fmt.Sprintf("Exported identifier %q is too vague for agents to infer intent.", fn.Name.Name),
+			map[string]float64{"count": 1})
+	}
+}
+
+func (c *goQualityCollector) collectGenDeclarationQuality(gen *ast.GenDecl) {
+	for _, spec := range gen.Specs {
+		switch x := spec.(type) {
+		case *ast.TypeSpec:
+			if !c.testFile {
+				c.report.metrics.TotalSymbolCount++
+			}
+			c.collectExportDoc(x.Name, firstComment(x.Doc, x.Comment, gen.Doc), Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Name.Pos(), x.Name.End())}, x.Name.Name)
+			if !c.testFile && isExported(x.Name.Name) && weakName(x.Name.Name) {
+				c.report.metrics.WeakIdentifierCount++
+				c.addFinding("quality_weak_identifier_name", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Name.Pos(), x.Name.End())}, x.Name.Name,
+					fmt.Sprintf("Exported identifier %q is too vague for agents to infer intent.", x.Name.Name),
+					map[string]float64{"count": 1})
+			}
+		case *ast.ValueSpec:
+			for _, name := range x.Names {
+				if !c.testFile {
+					c.report.metrics.TotalSymbolCount++
+				}
+				c.collectExportDoc(name, firstComment(x.Doc, x.Comment, gen.Doc), Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, name.Pos(), name.End())}, name.Name)
+				if !c.testFile && isExported(name.Name) && weakName(name.Name) {
+					c.report.metrics.WeakIdentifierCount++
+					c.addFinding("quality_weak_identifier_name", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, name.Pos(), name.End())}, name.Name,
+						fmt.Sprintf("Exported identifier %q is too vague for agents to infer intent.", name.Name),
+						map[string]float64{"count": 1})
+				}
+			}
+		}
+	}
+}
+
+func (c *goQualityCollector) collectExportDoc(name *ast.Ident, doc *ast.CommentGroup, loc Location, symbol string) {
+	if name == nil || !isExported(name.Name) || c.testFile {
+		return
+	}
+	c.report.metrics.ExportedSymbolCount++
+	if strings.TrimSpace(commentText(doc)) != "" {
+		c.report.metrics.DocumentedExportCount++
+		return
+	}
+	c.report.metrics.UndocumentedExportCount++
+	c.addFinding("quality_undocumented_export", "info", loc, symbol,
+		fmt.Sprintf("Exported identifier %s has no doc comment.", symbol),
+		map[string]float64{"count": 1})
 }
 
 func (c *goQualityCollector) collectTypeQuality(gen *ast.GenDecl) {
@@ -129,6 +371,7 @@ func (c *goQualityCollector) collectTypeQuality(gen *ast.GenDecl) {
 		switch typ := ts.Type.(type) {
 		case *ast.StructType:
 			fields := fieldCount(typ.Fields)
+			c.collectExportedFieldDocs(ts.Name.Name, typ.Fields)
 			if fields > goStructFieldThreshold {
 				c.addFinding("quality_large_struct", "info", Location{URI: c.pf.path, Range: declRange(c.pf.fset, gen, ts)}, ts.Name.Name,
 					fmt.Sprintf("Struct %s has %d fields; consider extracting cohesive subtypes.", ts.Name.Name, fields),
@@ -136,11 +379,28 @@ func (c *goQualityCollector) collectTypeQuality(gen *ast.GenDecl) {
 			}
 		case *ast.InterfaceType:
 			methods := fieldCount(typ.Methods)
+			c.collectExportedFieldDocs(ts.Name.Name, typ.Methods)
 			if methods > goInterfaceMethodThreshold {
 				c.addFinding("quality_broad_interface", "info", Location{URI: c.pf.path, Range: declRange(c.pf.fset, gen, ts)}, ts.Name.Name,
 					fmt.Sprintf("Interface %s has %d methods; consider smaller consumer-owned interfaces.", ts.Name.Name, methods),
 					map[string]float64{"methods": float64(methods), "threshold": goInterfaceMethodThreshold})
 			}
+		}
+	}
+}
+
+func (c *goQualityCollector) collectExportedFieldDocs(container string, fields *ast.FieldList) {
+	if fields == nil || c.testFile {
+		return
+	}
+	for _, field := range fields.List {
+		for _, name := range field.Names {
+			c.report.metrics.TotalSymbolCount++
+			if !isExported(name.Name) {
+				continue
+			}
+			qname := container + "." + name.Name
+			c.collectExportDoc(name, firstComment(field.Doc, field.Comment), Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, name.Pos(), name.End())}, qname)
 		}
 	}
 }
@@ -163,13 +423,17 @@ func (c *goQualityCollector) functionQuality(fn *ast.FuncDecl) goFunctionQuality
 		switch x := n.(type) {
 		case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 			q.complexity++
+			c.report.metrics.TotalBranchCount++
 		case *ast.CaseClause:
 			q.complexity++
+			c.report.metrics.TotalBranchCount++
 		case *ast.CommClause:
 			q.complexity++
+			c.report.metrics.TotalBranchCount++
 		case *ast.BinaryExpr:
 			if x.Op == token.LAND || x.Op == token.LOR {
 				q.complexity++
+				c.report.metrics.TotalBranchCount++
 			}
 		case *ast.ReturnStmt:
 			q.returns++
@@ -360,6 +624,12 @@ func (c *goQualityCollector) collectExprSmells(expr ast.Expr, loopDepth int) {
 					"Process-level exit or panic bypasses normal error handling and cleanup.",
 					map[string]float64{"count": 1})
 			}
+			if c.testFile && c.isFlakyTestCall(x) {
+				c.report.metrics.FlakyTestSmellCount++
+				c.addFinding("coverage_flaky_test_smell", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, x.Pos(), x.End())}, "",
+					"Test uses sleep, wall-clock, randomness, or network-like calls that can make automation nondeterministic.",
+					map[string]float64{"count": 1})
+			}
 		}
 		return true
 	})
@@ -375,6 +645,24 @@ func (c *goQualityCollector) isProcessExitCall(call *ast.CallExpr) bool {
 			return false
 		}
 		return importPath == "os" && fun.Sel.Name == "Exit" || importPath == "log" && strings.HasPrefix(fun.Sel.Name, "Fatal")
+	default:
+		return false
+	}
+}
+
+func (c *goQualityCollector) isFlakyTestCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	importPath := c.imports[exprName(selector.X)]
+	switch importPath {
+	case "time":
+		return selector.Sel.Name == "Sleep" || selector.Sel.Name == "Now" || selector.Sel.Name == "After" || selector.Sel.Name == "Tick"
+	case "math/rand", "crypto/rand":
+		return true
+	case "net/http":
+		return selector.Sel.Name == "Get" || selector.Sel.Name == "Post" || selector.Sel.Name == "Head" || selector.Sel.Name == "Do"
 	default:
 		return false
 	}
@@ -509,6 +797,134 @@ func importAliases(file *ast.File) map[string]string {
 
 func isVendorPath(p string) bool {
 	return p == "vendor" || strings.HasPrefix(p, "vendor/") || strings.Contains(p, "/vendor/")
+}
+
+func isGoTestPath(p string) bool {
+	return strings.HasSuffix(p, "_test.go")
+}
+
+func (c *goQualityCollector) isRunnableGoTestFunction(fn *ast.FuncDecl) bool {
+	prefix, param := runnableTestPrefix(fn.Name.Name)
+	if prefix == "" || fn.Recv != nil || fn.Type == nil || fn.Type.Params == nil || len(fn.Type.Params.List) != 1 {
+		return false
+	}
+	field := fn.Type.Params.List[0]
+	if len(field.Names) > 1 {
+		return false
+	}
+	star, ok := field.Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	selector, ok := star.X.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != param {
+		return false
+	}
+	importPath := c.imports[exprName(selector.X)]
+	return importPath == "testing"
+}
+
+func runnableTestPrefix(name string) (string, string) {
+	for _, candidate := range []struct {
+		prefix string
+		param  string
+	}{
+		{prefix: "Test", param: "T"},
+		{prefix: "Benchmark", param: "B"},
+		{prefix: "Fuzz", param: "F"},
+	} {
+		if isRunnableTestName(name, candidate.prefix) {
+			return candidate.prefix, candidate.param
+		}
+	}
+	return "", ""
+}
+
+func isRunnableTestName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if len(name) == len(prefix) {
+		return true
+	}
+	next := rune(name[len(prefix)])
+	return next < 'a' || next > 'z'
+}
+
+func functionUsesTablePattern(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.RangeStmt:
+			if id, ok := x.X.(*ast.Ident); ok && strings.Contains(strings.ToLower(id.Name), "tests") {
+				found = true
+				return false
+			}
+		case *ast.CompositeLit:
+			if array, ok := x.Type.(*ast.ArrayType); ok {
+				if _, ok := array.Elt.(*ast.StructType); ok {
+					found = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func weakName(name string) bool {
+	switch strings.ToLower(name) {
+	case "util", "utils", "common", "misc", "data", "manager", "helper", "helpers":
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeIntMaps(dst *map[string]int, src map[string]int) {
+	if len(src) == 0 {
+		return
+	}
+	if *dst == nil {
+		*dst = map[string]int{}
+	}
+	for key, value := range src {
+		(*dst)[key] += value
+	}
+}
+
+func mergeBoolMaps(dst *map[string]bool, src map[string]bool) {
+	if len(src) == 0 {
+		return
+	}
+	if *dst == nil {
+		*dst = map[string]bool{}
+	}
+	for key, value := range src {
+		(*dst)[key] = (*dst)[key] || value
+	}
+}
+
+func sortedBoolMapKeys(values map[string]bool) []string {
+	var out []string
+	for key, value := range values {
+		if value {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func percent(part, total int) int {
+	if total <= 0 {
+		return 0
+	}
+	return part * 100 / total
 }
 
 func hasBlankLHS(assign *ast.AssignStmt) bool {

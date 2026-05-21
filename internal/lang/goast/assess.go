@@ -166,6 +166,7 @@ func goQualityFindings(idx *index, opts AssessmentOptions) []Finding {
 	all := assessmentGateEnabled(opts, AssessmentGateAll)
 	maintainability := assessmentGateEnabled(opts, AssessmentGateMaintainability)
 	safety := assessmentGateEnabled(opts, AssessmentGateSafety)
+	coverage := assessmentGateEnabled(opts, AssessmentGateCoverage)
 	out := make([]Finding, 0, len(idx.quality.findings))
 	for _, finding := range idx.quality.findings {
 		switch {
@@ -177,6 +178,10 @@ func goQualityFindings(idx *index, opts AssessmentOptions) []Finding {
 			}
 		case strings.HasPrefix(finding.Kind, "safety_"):
 			if safety {
+				out = append(out, finding)
+			}
+		case strings.HasPrefix(finding.Kind, "coverage_"):
+			if coverage {
 				out = append(out, finding)
 			}
 		}

@@ -593,12 +593,298 @@ func Complex(a, b, c, d, e, f int) int {
 		t.Fatal(err)
 	}
 	for _, finding := range report.Findings {
-		if strings.HasPrefix(finding.Kind, "quality_") || strings.HasPrefix(finding.Kind, "performance_") {
-			t.Fatalf("expected generated/vendor files to be skipped for quality findings, got %#v", report.Findings)
+		if finding.Location.URI == "generated.go" || strings.HasPrefix(finding.Location.URI, "vendor/") {
+			t.Fatalf("expected generated/vendor files to be skipped for file-specific quality findings, got %#v", report.Findings)
 		}
 	}
 	if report.Metrics["max_cyclomatic_complexity"] != 1 {
 		t.Fatalf("expected only normal file metrics, got %#v", report.Metrics)
+	}
+	if report.Metrics["generated_loc_percent"] == 0 || !hasFinding(report, "quality_high_generated_ratio") {
+		t.Fatalf("expected generated LOC to be counted as an aggregate signal, got %#v %#v", report.Metrics, report.Findings)
+	}
+}
+
+func TestEngineAssessReportsGoDocsAndNamingMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "util/util.go", `package util
+
+// Good documents an exported function.
+func Good() {}
+
+func Helper() {}
+
+type Manager struct {
+	Field string
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"quality_undocumented_export", "quality_low_doc_coverage", "quality_weak_package_name", "quality_weak_identifier_name"} {
+		if !hasFinding(report, kind) {
+			t.Fatalf("expected %s finding, got %#v", kind, report.Findings)
+		}
+	}
+	if report.Metrics["doc_coverage_percent"] == 100 || report.Metrics["undocumented_export_count"] == 0 || report.Metrics["weak_package_name_count"] == 0 || report.Metrics["weak_identifier_count"] == 0 {
+		t.Fatalf("unexpected docs/naming metrics: %#v", report.Metrics)
+	}
+}
+
+func TestEngineAssessCountsWeakPackageNameOncePerPackage(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "util/a.go", "package util\n\n// A documents A.\nfunc A() {}\n")
+	writeEngineFile(t, root, "util/b.go", "package util\n\n// B documents B.\nfunc B() {}\n")
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["weak_package_name_count"] != 1 {
+		t.Fatalf("expected one weak package metric for multi-file package, got %#v", report.Metrics)
+	}
+	if n := countFindings(report, "quality_weak_package_name"); n != 1 {
+		t.Fatalf("expected one weak package finding, got %d in %#v", n, report.Findings)
+	}
+}
+
+func TestEngineAssessTreatsTrailingCommentsAsDocs(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", `package demo
+
+const Foo = 1 // Foo is documented.
+
+var Bar = 2 // Bar is documented.
+
+type Thing struct {
+	Field string // Field is documented.
+} // Thing is documented.
+
+type Service interface {
+	Run() // Run is documented.
+} // Service is documented.
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasFinding(report, "quality_undocumented_export") {
+		t.Fatalf("expected trailing comments to count as docs, got %#v", report.Findings)
+	}
+	if report.Metrics["doc_coverage_percent"] != 100 || report.Metrics["undocumented_export_count"] != 0 {
+		t.Fatalf("unexpected doc metrics for trailing comments: %#v", report.Metrics)
+	}
+}
+
+func TestEngineAssessReportsGoTestabilityMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", `package demo
+
+// Add adds two numbers.
+func Add(a, b int) int {
+	if a > 0 {
+		return a + b
+	}
+	return b
+}
+`)
+	writeEngineFile(t, root, "demo_test.go", `package demo
+
+import (
+	"testing"
+	"time"
+)
+
+func TestAdd(t *testing.T) {
+	tests := []struct {
+		name string
+		a int
+		b int
+		want int
+	}{
+		{"basic", 1, 2, 3},
+	}
+	for _, tt := range tests {
+		time.Sleep(1)
+		if got := Add(tt.a, tt.b); got != tt.want {
+			t.Fatal(got)
+		}
+	}
+}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go, IncludeTests: true},
+		Gates: []AssessmentGate{AssessmentGateAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["test_file_count"] != 1 || report.Metrics["test_function_count"] != 1 || report.Metrics["table_test_count"] != 1 || report.Metrics["flaky_test_smell_count"] != 1 {
+		t.Fatalf("unexpected testability metrics: %#v", report.Metrics)
+	}
+	if !hasFinding(report, "coverage_flaky_test_smell") {
+		t.Fatalf("expected flaky test smell finding, got %#v", report.Findings)
+	}
+}
+
+func TestEngineAssessCountsOnlyRunnableGoTests(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", "package demo\n\n// Add adds numbers.\nfunc Add(a, b int) int { return a + b }\n")
+	writeEngineFile(t, root, "demo_test.go", `package demo
+
+func TestData() {}
+
+func BenchmarkConfig() {}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go, IncludeTests: true},
+		Gates: []AssessmentGate{AssessmentGateCoverage},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["test_function_count"] != 0 {
+		t.Fatalf("expected helper-like prefixed functions not to count as runnable tests, got %#v", report.Metrics)
+	}
+	if !hasFinding(report, "coverage_no_go_tests") {
+		t.Fatalf("expected no runnable tests finding, got %#v", report.Findings)
+	}
+}
+
+func TestEngineAssessCountsExactRunnableGoTestNames(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", "package demo\n\n// Add adds numbers.\nfunc Add(a, b int) int { return a + b }\n")
+	writeEngineFile(t, root, "demo_test.go", `package demo
+
+import "testing"
+
+func Test(t *testing.T) {}
+
+func Benchmark(b *testing.B) {}
+
+func Fuzz(f *testing.F) {}
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go, IncludeTests: true},
+		Gates: []AssessmentGate{AssessmentGateCoverage},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["test_function_count"] != 3 {
+		t.Fatalf("expected exact Test/Benchmark/Fuzz names to count as runnable tests, got %#v", report.Metrics)
+	}
+	if hasFinding(report, "coverage_no_go_tests") {
+		t.Fatalf("did not expect no-tests finding, got %#v", report.Findings)
+	}
+}
+
+func TestEngineAssessIgnoresWeakExportedNamesInTests(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeEngineFile(t, root, "demo.go", "package demo\n\n// Add adds numbers.\nfunc Add(a, b int) int { return a + b }\n")
+	writeEngineFile(t, root, "demo_test.go", `package demo
+
+import "testing"
+
+func TestAdd(t *testing.T) {}
+
+func Helper() {}
+
+type Manager struct{}
+
+var Data = "fixture"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope: Scope{Language: Go, IncludeTests: true},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics["weak_identifier_count"] != 0 {
+		t.Fatalf("expected weak exported names in test files to be ignored, got %#v", report.Metrics)
+	}
+	if hasFinding(report, "quality_weak_identifier_name") {
+		t.Fatalf("did not expect weak identifier finding from test helper names, got %#v", report.Findings)
 	}
 }
 
@@ -1102,6 +1388,16 @@ func hasFinding(report AssessmentReport, kind string) bool {
 		}
 	}
 	return false
+}
+
+func countFindings(report AssessmentReport, kind string) int {
+	n := 0
+	for _, finding := range report.Findings {
+		if finding.Kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 func hasAllowedFinding(report AssessmentReport, kind string) bool {

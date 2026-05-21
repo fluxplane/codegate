@@ -416,7 +416,7 @@ func TestCodegateCapabilitiesMetricsFilter(t *testing.T) {
 	if !strings.Contains(got, `"language": "go"`) || strings.Contains(got, `"language": "markdown"`) {
 		t.Fatalf("expected language-filtered capabilities output:\n%s", got)
 	}
-	if !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"ignored_error_count"`) || strings.Contains(got, `"findings"`) || strings.Contains(got, `"capabilities"`) {
+	if !strings.Contains(got, `"max_cyclomatic_complexity"`) || !strings.Contains(got, `"doc_coverage_percent"`) || !strings.Contains(got, `"test_to_code_ratio"`) || !strings.Contains(got, `"ignored_error_count"`) || strings.Contains(got, `"findings"`) || strings.Contains(got, `"capabilities"`) {
 		t.Fatalf("unexpected metric-filtered capabilities output:\n%s", got)
 	}
 }

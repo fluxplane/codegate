@@ -87,7 +87,7 @@ fmt.Println(report.Summary.Score)
 
 Reports include scores, findings, violations, diagnostics, top units, and suggestions. They are designed to be consumed by LLMs, CI bots, and review automation.
 
-For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, and string concatenation in loops. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `large_function_count`, and `ignored_error_count`.
+For Go, maintainability and safety assessment includes deterministic AST-only quality signals such as cyclomatic complexity, nesting depth, function and file size, parameter and return counts, package/API shape, doc coverage, weak names, testability ratios, generated-code ratio, large structs, broad interfaces, ignored call results, unchecked type assertions, defer-in-loop, process exits, and string concatenation in loops. These stay backend-local and are exposed through generic findings and aggregate metrics such as `max_cyclomatic_complexity`, `doc_coverage_percent`, `test_to_code_ratio`, `large_function_count`, and `ignored_error_count`.
 
 Maintainability assessment also counts source debt markers in comments and prose. `TODO`, `FIXME`, `HACK`, `XXX`, and `DEPRECATED` markers appear as `maintainability_debt_marker` findings, with aggregate `debt_marker_count` and `debt_marker_counts` metrics. These produce advisory review suggestions only; codegate does not remove or rewrite intent-bearing notes automatically.
 

@@ -145,6 +145,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 		idx.debtMarkers = append(idx.debtMarkers, goDebtMarkers(pf.path, pf.src, pf.fset, pf.file)...)
 		idx.quality.merge(collectGoQuality(pf))
 	}
+	idx.quality.finalize(scope.IncludeTests)
 	for _, pf := range parsed {
 		indexDecls(idx, pf)
 		indexImports(idx, pf)
