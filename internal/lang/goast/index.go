@@ -34,6 +34,21 @@ func (b GoBackend) Spec() BackendSpec {
 			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Runs parse checks and best-effort type checking for local module code."},
 			{Capability: CapabilityReporting, Level: CapabilityBasic, Notes: "Feeds package, metric, diagnostic, and proposal data into assessment reports."},
 		},
+		Operations: OperationSupport{
+			Lookup:          []string{"symbol", "qualified_name", "position", "references", "callers", "callees"},
+			AssessmentGates: []AssessmentGate{AssessmentGateArchitecture, AssessmentGateMaintainability, AssessmentGateSafety, AssessmentGateCoverage},
+			ValidationKinds: []ValidationKind{ValidationParse, ValidationTypecheck},
+			EditOperations: []OperationKind{
+				OpReplaceFunction, OpAppendFunction, OpDeleteFunction, OpReplaceMethod, OpDeleteMethod,
+				OpReplaceSymbol, OpAppendSymbol, OpDeleteSymbol, OpReplaceComment, OpRenameSymbol,
+				OpEnsureStructTag, OpRemoveStructTag, OpEnsureGoImport, OpRemoveGoImport, OpRenameGoImport,
+				OpMoveSymbol, OpAddGoParameter, OpRemoveGoParam, OpRenameGoParam, OpAddGoField,
+				OpRemoveGoField, OpRenameGoField, OpChangeGoParam, OpChangeGoResult, OpRenameGoRecv,
+				OpAddGoIfaceMeth, OpRemoveGoIface, OpExtractGoFunc, OpExtractGoMethod,
+			},
+			RefactorKinds: []RefactorKind{RefactorDeleteSymbol, RefactorExtractFunction, RefactorIntroduceConfig, RefactorSplitFunction, RefactorSplitPackage, RefactorReplaceFlagArgument},
+			Notes:         []string{"Go edits are AST-backed and formatted in memory; typecheck validation is best-effort."},
+		},
 		ResolutionMode: "ast",
 	}
 }

@@ -57,6 +57,27 @@ func Target() string {
 	}
 }
 
+func TestCodegateMarkdownCycleApplyFirst(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "README.md", `Intro text.
+
+### Setup
+`)
+
+	var out bytes.Buffer
+	a := &app{out: &out, err: &bytes.Buffer{}}
+	cmd := a.rootCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--root", root, "--language", "markdown", "cycle", "--apply-first"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"applied": true`) || !strings.Contains(got, "+# README") || !strings.Contains(got, `"resolution_mode": "structural"`) {
+		t.Fatalf("unexpected markdown cycle output:\n%s", got)
+	}
+}
+
 func TestCodegateAssessRulesCommand(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/demo\n\ngo 1.24\n")
@@ -298,7 +319,7 @@ func TestCodegateCapabilitiesCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"language": "markdown"`) || !strings.Contains(got, `"capability": "lookup"`) {
+	if !strings.Contains(got, `"language": "go"`) || !strings.Contains(got, `"language": "markdown"`) || !strings.Contains(got, `"capability": "lookup"`) || !strings.Contains(got, `"markdown_h1_ensure"`) {
 		t.Fatalf("unexpected capabilities output:\n%s", got)
 	}
 }

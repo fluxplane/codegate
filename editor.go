@@ -667,6 +667,10 @@ func (e *Editor) backendForOperation(op Operation) (Backend, error) {
 		if backend, ok := e.backends[Go]; ok {
 			return backend, nil
 		}
+	case OpMarkdownEnsureH1, OpMarkdownSetHeadingLevel, OpMarkdownInsertSectionBody, OpMarkdownRenameHeading:
+		if backend, ok := e.backends[Markdown]; ok {
+			return backend, nil
+		}
 	}
 	if len(e.languages) == 1 {
 		if backend, ok := e.backends[e.languages[0]]; ok {

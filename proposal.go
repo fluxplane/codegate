@@ -12,12 +12,13 @@ type (
 )
 
 const (
-	RefactorDeleteSymbol        = core.RefactorDeleteSymbol
-	RefactorExtractFunction     = core.RefactorExtractFunction
-	RefactorIntroduceConfig     = core.RefactorIntroduceConfig
-	RefactorSplitFunction       = core.RefactorSplitFunction
-	RefactorSplitPackage        = core.RefactorSplitPackage
-	RefactorReplaceFlagArgument = core.RefactorReplaceFlagArgument
+	RefactorDeleteSymbol         = core.RefactorDeleteSymbol
+	RefactorExtractFunction      = core.RefactorExtractFunction
+	RefactorIntroduceConfig      = core.RefactorIntroduceConfig
+	RefactorSplitFunction        = core.RefactorSplitFunction
+	RefactorSplitPackage         = core.RefactorSplitPackage
+	RefactorReplaceFlagArgument  = core.RefactorReplaceFlagArgument
+	RefactorFixMarkdownStructure = core.RefactorFixMarkdownStructure
 )
 
 const (

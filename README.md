@@ -165,6 +165,8 @@ engine, err := codegate.New().
 
 It indexes documents, headings, anchors, and sections, then reports quality issues such as missing H1 titles, heading-level jumps, duplicate anchors, oversized sections, empty sections, and broken local heading links.
 
+Markdown also has a conservative fix loop. Missing H1 titles, heading-level jumps, empty sections, and safe duplicate-heading cases can produce executable operations. Broken local links stay advisory unless a future backend can infer the intended target unambiguously.
+
 ## CLI as an Agent Skill
 
 The `cmd/codegate` CLI exposes the same engine loop as JSON-first commands:
@@ -178,6 +180,7 @@ go run ./cmd/codegate --root . --language go assess --gate architecture --rules 
 go run ./cmd/codegate --root . --language go suggest --executable
 go run ./cmd/codegate --root . --language go cycle
 go run ./cmd/codegate --root . --language markdown assess --gate maintainability
+go run ./cmd/codegate --root . --language markdown cycle --apply-first
 ```
 
 `assess --fail-on` prints the normal JSON report first, then exits non-zero if a selected category has an unallowed violation. Supported categories are `boundary`, `test-boundary`, `effects`, `unknown`, and `all`.
@@ -227,6 +230,8 @@ engine, err := codegate.New().
 
 ## Capabilities
 
+`Capabilities()` and `codegate capabilities` report both coarse backend capability levels and operation-level support. Agents can use this to choose safe calls without guessing which language supports which validation modes or edit operations.
+
 Built-in backends:
 
 - Go via `language/golang`
@@ -234,11 +239,13 @@ Built-in backends:
   - editing: advanced for supported structured operations
   - refactoring: basic executable operations plus advisory suggestions
   - validation: parse and best-effort typecheck
+  - operation detail includes symbol/position lookup, architecture gates, typecheck validation, Go edit operations, and Go refactor kinds
 - Markdown via `language/markdown`
   - lookup and static analysis: basic structural support
   - quality reporting: basic
-  - editing and refactoring: not implemented yet
+  - editing and refactoring: basic deterministic structural fixes
   - validation: parse/structure checks
+  - operation detail includes document/heading/anchor lookup, maintainability/safety/coverage gates, parse validation, and Markdown structure edit operations
 
 ## Safety Model
 
@@ -256,7 +263,7 @@ Built-in backends:
 - Multiple workspace roots are rejected.
 - Go analysis is AST-first with best-effort typecheck validation, not full package loading.
 - Dynamic Go dispatch and function-value calls are incomplete.
-- Markdown support is structural and read-only.
+- Markdown support is structural; only conservative documentation fixes are executable.
 - CLI output is JSON-only.
 - External validation adapters for build/test workflows are not implemented yet.
 - Architecture policies are currently Go-only and AST-backed; tree-sitter-backed policy support for other languages is still upcoming.
@@ -273,4 +280,4 @@ Before tagging, run the checklist in [`RELEASE.md`](RELEASE.md). The normal test
 4. Add adapter-backed type-aware Go analysis without making core depend on local disk paths.
 5. Add validation adapters for explicit build/test workflows.
 6. Turn more refactor suggestions into executable operations when type-aware or user-guided inputs make them deterministic.
-7. Add Markdown edit/refactor operations for deterministic documentation fixes.
+7. Expand Markdown edit/refactor coverage for deterministic documentation fixes.

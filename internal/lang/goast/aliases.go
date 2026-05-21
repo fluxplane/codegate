@@ -7,6 +7,7 @@ type (
 	Capability                 = core.Capability
 	CapabilityLevel            = core.CapabilityLevel
 	CapabilitySupport          = core.CapabilitySupport
+	OperationSupport           = core.OperationSupport
 	Snapshot                   = core.Snapshot
 	Index                      = core.Index
 	Document                   = core.Document
@@ -57,6 +58,7 @@ type (
 	SymbolMetrics              = core.SymbolMetrics
 	Operation                  = core.Operation
 	OperationKind              = core.OperationKind
+	RefactorKind               = core.RefactorKind
 	FileEdit                   = core.FileEdit
 	TextEdit                   = core.TextEdit
 	ReplaceFunction            = core.ReplaceFunction
@@ -175,8 +177,13 @@ const (
 
 const (
 	OpRenameSymbol    = core.OpRenameSymbol
+	OpReplaceSymbol   = core.OpReplaceSymbol
+	OpAppendSymbol    = core.OpAppendSymbol
 	OpReplaceFunction = core.OpReplaceFunction
 	OpAppendFunction  = core.OpAppendFunction
+	OpDeleteFunction  = core.OpDeleteFunction
+	OpReplaceMethod   = core.OpReplaceMethod
+	OpDeleteMethod    = core.OpDeleteMethod
 	OpDeleteSymbol    = core.OpDeleteSymbol
 	OpReplaceComment  = core.OpReplaceComment
 	OpEnsureStructTag = core.OpEnsureStructTag

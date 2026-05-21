@@ -9,6 +9,7 @@ type (
 	Capability        = core.Capability
 	CapabilityLevel   = core.CapabilityLevel
 	CapabilitySupport = core.CapabilitySupport
+	OperationSupport  = core.OperationSupport
 	Backend           = core.Backend
 	Source            = core.Snapshot
 	Document          = core.Document

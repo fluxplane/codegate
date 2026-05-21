@@ -2,7 +2,6 @@ package markdown
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -31,10 +30,18 @@ func (b MarkdownBackend) Spec() BackendSpec {
 			{Capability: CapabilityLookup, Level: CapabilityBasic, Notes: "Indexes documents, headings, anchors, and enclosing sections."},
 			{Capability: CapabilityStaticAnalysis, Level: CapabilityBasic, Notes: "Parses Markdown structure through goldmark."},
 			{Capability: CapabilityQuality, Level: CapabilityBasic, Notes: "Reports structural quality findings for headings, sections, and local links."},
-			{Capability: CapabilityEditing, Level: CapabilityNone, Notes: "Markdown editing operations are not implemented yet."},
-			{Capability: CapabilityRefactoring, Level: CapabilityNone, Notes: "Markdown refactoring operations are not implemented yet."},
+			{Capability: CapabilityEditing, Level: CapabilityBasic, Notes: "Compiles conservative structural Markdown cleanup operations into text edits."},
+			{Capability: CapabilityRefactoring, Level: CapabilityBasic, Notes: "Suggests deterministic Markdown structure fixes where safe."},
 			{Capability: CapabilityValidation, Level: CapabilityBasic, Notes: "Validates files can be parsed and indexed as Markdown."},
 			{Capability: CapabilityReporting, Level: CapabilityBasic, Notes: "Feeds Markdown structural findings into assessment reports."},
+		},
+		Operations: OperationSupport{
+			Lookup:          []string{"document", "heading", "anchor", "position"},
+			AssessmentGates: []AssessmentGate{AssessmentGateMaintainability, AssessmentGateSafety, AssessmentGateCoverage},
+			ValidationKinds: []ValidationKind{ValidationParse},
+			EditOperations:  []OperationKind{OpMarkdownEnsureH1, OpMarkdownSetHeadingLevel, OpMarkdownInsertSectionBody, OpMarkdownRenameHeading},
+			RefactorKinds:   []RefactorKind{RefactorFixMarkdownStructure},
+			Notes:           []string{"Markdown fixes are structural and conservative; broken-link repair stays advisory unless unambiguous."},
 		},
 		ResolutionMode: "structural",
 	}
@@ -48,16 +55,16 @@ func (b MarkdownBackend) Index(ctx context.Context, snapshot Snapshot, scope Sco
 	return exportIndex(idx), nil
 }
 
-func (b MarkdownBackend) CompileEdit(context.Context, Snapshot, Operation) ([]FileEdit, error) {
-	return nil, errors.New("markdown: edit operations are not supported")
+func (b MarkdownBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operation) ([]FileEdit, error) {
+	return compileMarkdownEdit(ctx, snapshot, op)
 }
 
 func (b MarkdownBackend) Format(_ context.Context, _ string, src []byte) ([]byte, error) {
 	return src, nil
 }
 
-func (b MarkdownBackend) Suggest(context.Context, Snapshot, Scope) ([]core.Proposal, error) {
-	return nil, nil
+func (b MarkdownBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) ([]core.Proposal, error) {
+	return markdownSuggestions(ctx, snapshot, scope)
 }
 
 type index struct {
@@ -193,14 +200,15 @@ func parseMarkdownFile(p string, src []byte) markdownFile {
 			if anchorCounts[baseAnchor] > 1 {
 				qualifiedAnchor = fmt.Sprintf("%s-%d", baseAnchor, anchorCounts[baseAnchor]-1)
 			}
-			lineRange := blockRange(src, node)
+			selectionRange := blockRange(src, node)
+			lineRange := lineRangeAtOffset(src, selectionRange.Start.Offset)
 			headings = append(headings, headingInfo{
 				level:     node.Level,
 				name:      name,
 				anchor:    baseAnchor,
 				qualified: p + "#" + qualifiedAnchor,
 				location:  Location{URI: p, Range: lineRange},
-				selection: lineRange,
+				selection: selectionRange,
 			})
 		case *goldast.Link:
 			destination := string(node.Destination)
@@ -296,6 +304,27 @@ func blockRange(src []byte, n goldast.Node) Range {
 		return Range{Start: positionForOffset(src, start), End: positionForOffset(src, end)}
 	}
 	return Range{Start: positionForOffset(src, 0), End: positionForOffset(src, len(src))}
+}
+
+func lineRangeAtOffset(src []byte, offset int) Range {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(src) {
+		offset = len(src)
+	}
+	start := offset
+	for start > 0 && src[start-1] != '\n' {
+		start--
+	}
+	end := offset
+	for end < len(src) && src[end] != '\n' {
+		end++
+	}
+	if end < len(src) {
+		end++
+	}
+	return Range{Start: positionForOffset(src, start), End: positionForOffset(src, end)}
 }
 
 func nodeRange(src []byte, n goldast.Node) Range {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -80,6 +81,12 @@ func TestEngineCapabilities(t *testing.T) {
 	if !hasCapability(specs[1], CapabilityLookup, CapabilityBasic) {
 		t.Fatalf("markdown backend did not declare basic lookup: %#v", specs[1].Capabilities)
 	}
+	if !hasOperation(specs[0].Operations.ValidationKinds, ValidationTypecheck) {
+		t.Fatalf("go backend did not declare typecheck validation: %#v", specs[0].Operations)
+	}
+	if !hasOperation(specs[1].Operations.EditOperations, OpMarkdownEnsureH1) || hasOperation(specs[1].Operations.ValidationKinds, ValidationTypecheck) {
+		t.Fatalf("markdown backend did not declare expected operation detail: %#v", specs[1].Operations)
+	}
 }
 
 func TestEngineMarkdownLookupAssessValidate(t *testing.T) {
@@ -145,6 +152,98 @@ See [Missing](#missing).
 	}
 	if !validation.Passed || validation.ResolutionMode != "structural" || len(validation.AffectedPaths) != 1 {
 		t.Fatalf("unexpected markdown validation: %#v", validation)
+	}
+}
+
+func TestEngineMarkdownSuggestApplyValidateReassess(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "README.md", `Intro text.
+
+## Parent
+
+#### Setup
+
+## Duplicate
+content
+
+## Duplicate
+
+See [Missing](#missing).
+`)
+
+	ctx := context.Background()
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(internalmarkdown.New()).
+		Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := eng.Assess(ctx, AssessmentOptions{
+		Scope: Scope{Language: Markdown},
+		Gates: []AssessmentGate{AssessmentGateMaintainability},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.Suggestions == 0 || report.Summary.ExecutableFixes == 0 {
+		t.Fatalf("expected executable markdown suggestions, got %#v", report)
+	}
+
+	proposals, err := eng.Suggest(ctx, SuggestOptions{Scope: Scope{Language: Markdown}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingH1 := proposalWithEvidence(proposals, "markdown_missing_h1")
+	if missingH1 == nil || len(missingH1.Operations) == 0 {
+		t.Fatalf("expected executable missing-H1 proposal, got %#v", proposals)
+	}
+	brokenLink := proposalWithEvidence(proposals, "markdown_broken_local_heading_link")
+	if brokenLink == nil || len(brokenLink.Operations) != 0 {
+		t.Fatalf("expected broken-link proposal to remain advisory, got %#v", brokenLink)
+	}
+	headingJump := proposalWithEvidence(proposals, "markdown_heading_level_jump")
+	if headingJump == nil || len(headingJump.Operations) == 0 {
+		t.Fatalf("expected executable heading-jump proposal, got %#v", proposals)
+	}
+	emptySection := proposalWithEvidence(proposals, "markdown_empty_section")
+	if emptySection == nil || len(emptySection.Operations) == 0 {
+		t.Fatalf("expected executable empty-section proposal, got %#v", proposals)
+	}
+	duplicateHeading := proposalWithEvidence(proposals, "markdown_duplicate_heading_anchor")
+	if duplicateHeading == nil || len(duplicateHeading.Operations) == 0 {
+		t.Fatalf("expected executable duplicate-heading proposal, got %#v", proposals)
+	}
+
+	changes := eng.NewChangeSet()
+	if err := changes.Apply(ctx, missingH1.Operations...); err != nil {
+		t.Fatal(err)
+	}
+	validation, err := changes.Validate(ctx, ValidationOptions{Scope: Scope{Language: Markdown}, Kinds: []ValidationKind{ValidationParse}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Passed {
+		t.Fatalf("expected markdown validation to pass after fix, got %#v", validation)
+	}
+	diff, err := changes.Diff(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "+# README") {
+		t.Fatalf("expected H1 in diff, got:\n%s", diff)
+	}
+	if err := changes.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reassessed, err := eng.Assess(ctx, AssessmentOptions{Scope: Scope{Language: Markdown}, Gates: []AssessmentGate{AssessmentGateMaintainability}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasFinding(reassessed, "markdown_missing_h1") {
+		t.Fatalf("expected missing H1 finding to be fixed, got %#v", reassessed.Findings)
 	}
 }
 
@@ -704,6 +803,26 @@ func hasCapability(spec BackendSpec, capability Capability, level CapabilityLeve
 		}
 	}
 	return false
+}
+
+func hasOperation[T comparable](values []T, target T) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func proposalWithEvidence(proposals []Proposal, kind string) *Proposal {
+	for i := range proposals {
+		for _, evidence := range proposals[i].Evidence {
+			if evidence.Kind == kind {
+				return &proposals[i]
+			}
+		}
+	}
+	return nil
 }
 
 func inactiveGOOS() string {

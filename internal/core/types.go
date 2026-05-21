@@ -23,6 +23,7 @@ type BackendSpec struct {
 	Name           string              `json:"name"`
 	FileExtensions []string            `json:"file_extensions"`
 	Capabilities   []CapabilitySupport `json:"capabilities"`
+	Operations     OperationSupport    `json:"operations,omitempty"`
 	ResolutionMode string              `json:"resolution_mode"`
 }
 
@@ -51,6 +52,15 @@ type CapabilitySupport struct {
 	Capability Capability      `json:"capability"`
 	Level      CapabilityLevel `json:"level"`
 	Notes      string          `json:"notes,omitempty"`
+}
+
+type OperationSupport struct {
+	Lookup          []string         `json:"lookup,omitempty"`
+	AssessmentGates []AssessmentGate `json:"assessment_gates,omitempty"`
+	ValidationKinds []ValidationKind `json:"validation_kinds,omitempty"`
+	EditOperations  []OperationKind  `json:"edit_operations,omitempty"`
+	RefactorKinds   []RefactorKind   `json:"refactor_kinds,omitempty"`
+	Notes           []string         `json:"notes,omitempty"`
 }
 
 type Snapshot interface {
@@ -630,36 +640,40 @@ type Operation interface {
 type OperationKind string
 
 const (
-	OpRenameSymbol    OperationKind = "rename_symbol"
-	OpReplaceSymbol   OperationKind = "replace_symbol"
-	OpDeleteSymbol    OperationKind = "delete_symbol"
-	OpReadSymbol      OperationKind = "read_symbol"
-	OpAppendSymbol    OperationKind = "append_symbol"
-	OpReplaceFunction OperationKind = "replace_function"
-	OpAppendFunction  OperationKind = "append_function"
-	OpDeleteFunction  OperationKind = "delete_function"
-	OpReplaceMethod   OperationKind = "replace_method"
-	OpDeleteMethod    OperationKind = "delete_method"
-	OpReplaceComment  OperationKind = "replace_comment"
-	OpEnsureStructTag OperationKind = "go_struct_tag_ensure"
-	OpRemoveStructTag OperationKind = "go_struct_tag_remove"
-	OpEnsureGoImport  OperationKind = "go_import_ensure"
-	OpRemoveGoImport  OperationKind = "go_import_remove"
-	OpRenameGoImport  OperationKind = "go_import_rename"
-	OpMoveSymbol      OperationKind = "move_symbol"
-	OpAddGoParameter  OperationKind = "go_parameter_add"
-	OpRemoveGoParam   OperationKind = "go_parameter_remove"
-	OpRenameGoParam   OperationKind = "go_parameter_rename"
-	OpAddGoField      OperationKind = "go_struct_field_add"
-	OpRemoveGoField   OperationKind = "go_struct_field_remove"
-	OpRenameGoField   OperationKind = "go_struct_field_rename"
-	OpChangeGoParam   OperationKind = "go_parameter_type_change"
-	OpChangeGoResult  OperationKind = "go_result_type_change"
-	OpRenameGoRecv    OperationKind = "go_receiver_rename"
-	OpAddGoIfaceMeth  OperationKind = "go_interface_method_add"
-	OpRemoveGoIface   OperationKind = "go_interface_method_remove"
-	OpExtractGoFunc   OperationKind = "go_function_extract"
-	OpExtractGoMethod OperationKind = "go_method_extract"
+	OpRenameSymbol              OperationKind = "rename_symbol"
+	OpReplaceSymbol             OperationKind = "replace_symbol"
+	OpDeleteSymbol              OperationKind = "delete_symbol"
+	OpReadSymbol                OperationKind = "read_symbol"
+	OpAppendSymbol              OperationKind = "append_symbol"
+	OpReplaceFunction           OperationKind = "replace_function"
+	OpAppendFunction            OperationKind = "append_function"
+	OpDeleteFunction            OperationKind = "delete_function"
+	OpReplaceMethod             OperationKind = "replace_method"
+	OpDeleteMethod              OperationKind = "delete_method"
+	OpReplaceComment            OperationKind = "replace_comment"
+	OpEnsureStructTag           OperationKind = "go_struct_tag_ensure"
+	OpRemoveStructTag           OperationKind = "go_struct_tag_remove"
+	OpEnsureGoImport            OperationKind = "go_import_ensure"
+	OpRemoveGoImport            OperationKind = "go_import_remove"
+	OpRenameGoImport            OperationKind = "go_import_rename"
+	OpMoveSymbol                OperationKind = "move_symbol"
+	OpAddGoParameter            OperationKind = "go_parameter_add"
+	OpRemoveGoParam             OperationKind = "go_parameter_remove"
+	OpRenameGoParam             OperationKind = "go_parameter_rename"
+	OpAddGoField                OperationKind = "go_struct_field_add"
+	OpRemoveGoField             OperationKind = "go_struct_field_remove"
+	OpRenameGoField             OperationKind = "go_struct_field_rename"
+	OpChangeGoParam             OperationKind = "go_parameter_type_change"
+	OpChangeGoResult            OperationKind = "go_result_type_change"
+	OpRenameGoRecv              OperationKind = "go_receiver_rename"
+	OpAddGoIfaceMeth            OperationKind = "go_interface_method_add"
+	OpRemoveGoIface             OperationKind = "go_interface_method_remove"
+	OpExtractGoFunc             OperationKind = "go_function_extract"
+	OpExtractGoMethod           OperationKind = "go_method_extract"
+	OpMarkdownEnsureH1          OperationKind = "markdown_h1_ensure"
+	OpMarkdownSetHeadingLevel   OperationKind = "markdown_heading_level_set"
+	OpMarkdownInsertSectionBody OperationKind = "markdown_section_body_insert"
+	OpMarkdownRenameHeading     OperationKind = "markdown_heading_rename"
 )
 
 type TextEdit struct {
@@ -932,15 +946,47 @@ type ExtractGoMethod struct {
 
 func (ExtractGoMethod) Kind() OperationKind { return OpExtractGoMethod }
 
+type EnsureMarkdownH1 struct {
+	Path  string
+	Title string
+}
+
+func (EnsureMarkdownH1) Kind() OperationKind { return OpMarkdownEnsureH1 }
+
+type SetMarkdownHeadingLevel struct {
+	Path   string
+	Offset int
+	Level  int
+}
+
+func (SetMarkdownHeadingLevel) Kind() OperationKind { return OpMarkdownSetHeadingLevel }
+
+type InsertMarkdownSectionBody struct {
+	Path   string
+	Offset int
+	Text   string
+}
+
+func (InsertMarkdownSectionBody) Kind() OperationKind { return OpMarkdownInsertSectionBody }
+
+type RenameMarkdownHeading struct {
+	Path    string
+	Offset  int
+	NewText string
+}
+
+func (RenameMarkdownHeading) Kind() OperationKind { return OpMarkdownRenameHeading }
+
 type RefactorKind string
 
 const (
-	RefactorDeleteSymbol        RefactorKind = "delete_symbol"
-	RefactorExtractFunction     RefactorKind = "extract_function"
-	RefactorIntroduceConfig     RefactorKind = "introduce_config"
-	RefactorSplitFunction       RefactorKind = "split_function"
-	RefactorSplitPackage        RefactorKind = "split_package"
-	RefactorReplaceFlagArgument RefactorKind = "replace_flag_argument"
+	RefactorDeleteSymbol         RefactorKind = "delete_symbol"
+	RefactorExtractFunction      RefactorKind = "extract_function"
+	RefactorIntroduceConfig      RefactorKind = "introduce_config"
+	RefactorSplitFunction        RefactorKind = "split_function"
+	RefactorSplitPackage         RefactorKind = "split_package"
+	RefactorReplaceFlagArgument  RefactorKind = "replace_flag_argument"
+	RefactorFixMarkdownStructure RefactorKind = "fix_markdown_structure"
 )
 
 type Confidence string

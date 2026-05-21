@@ -21,9 +21,19 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 	}
 	findings := markdownFindings(idx, opts)
 	violations := markdownViolations(validation, opts)
+	proposals, err := b.Suggest(ctx, snapshot, scope)
+	if err != nil {
+		return AssessmentReport{}, err
+	}
 	scores := markdownScores(validation.Passed, findings, violations)
 	diagnostics := append([]Diagnostic(nil), idx.diagnostics...)
 	diagnostics = append(diagnostics, validation.Diagnostics...)
+	executable := 0
+	for _, proposal := range proposals {
+		if len(proposal.Operations) > 0 {
+			executable++
+		}
+	}
 	return AssessmentReport{
 		Language: string(Markdown),
 		Summary: AssessmentSummary{
@@ -33,8 +43,8 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 			Findings:        len(findings),
 			Violations:      len(violations),
 			Diagnostics:     len(diagnostics),
-			Suggestions:     0,
-			ExecutableFixes: 0,
+			Suggestions:     len(proposals),
+			ExecutableFixes: executable,
 		},
 		Scores: scores,
 		Validation: ValidationSummary{
@@ -46,12 +56,34 @@ func (b MarkdownBackend) Assess(ctx context.Context, snapshot Snapshot, scope Sc
 		},
 		Findings:    findings,
 		Violations:  violations,
+		Suggestions: summarizeMarkdownAssessmentSuggestions(proposals, opts.SuggestionLimit),
 		Diagnostics: diagnostics,
 		Metrics: map[string]interface{}{
 			"score_model": "markdown-structure-v0",
 			"gates":       normalizedMarkdownAssessmentGates(opts.Gates),
 		},
 	}, nil
+}
+
+func summarizeMarkdownAssessmentSuggestions(proposals []Proposal, limit int) []AssessmentSuggestion {
+	out := make([]AssessmentSuggestion, 0, len(proposals))
+	for _, proposal := range proposals {
+		out = append(out, AssessmentSuggestion{
+			ID:         proposal.ID,
+			Kind:       proposal.Kind,
+			Title:      proposal.Title,
+			Summary:    proposal.Summary,
+			Confidence: proposal.Confidence,
+			Risk:       proposal.Risk,
+			Operations: len(proposal.Operations),
+			Metrics:    proposal.Metrics,
+			Evidence:   proposal.Evidence,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func markdownFindings(idx *index, opts AssessmentOptions) []Finding {

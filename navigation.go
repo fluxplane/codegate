@@ -113,7 +113,7 @@ func enclosingSymbol(symbols []Symbol, filePath string, offset int, exclude Symb
 	best := candidates[0]
 	bestSize := rangeSize(best.Location.Range)
 	for _, candidate := range candidates[1:] {
-		if size := rangeSize(candidate.Location.Range); size < bestSize {
+		if size := rangeSize(candidate.Location.Range); size < bestSize || size == bestSize && best.Kind == SymbolFile && candidate.Kind != SymbolFile {
 			best = candidate
 			bestSize = size
 		}
