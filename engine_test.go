@@ -467,6 +467,102 @@ func Names() []string {
 	}
 }
 
+func TestEngineAssessAgentruntimeStyleArchitecturePolicyExample(t *testing.T) {
+	root := t.TempDir()
+	writeEngineFile(t, root, "go.mod", "module github.com/fluxplane/agentruntime\n\ngo 1.24\n")
+	writeEngineFile(t, root, "core/operation/operation.go", `package operation
+
+const Name = "operation"
+`)
+	writeEngineFile(t, root, "core/resource/resource.go", `package resource
+
+import (
+	"github.com/fluxplane/agentruntime/core/operation"
+	"github.com/fluxplane/agentruntime/core/policy"
+	"github.com/fluxplane/agentruntime/core/session"
+)
+
+func Names() []string {
+	return []string{operation.Name, policy.Name, session.Name}
+}
+`)
+	writeEngineFile(t, root, "core/policy/policy.go", `package policy
+
+const Name = "policy"
+`)
+	writeEngineFile(t, root, "core/session/session.go", `package session
+
+const Name = "session"
+`)
+	writeEngineFile(t, root, "core/bad/bad.go", `package bad
+
+import "github.com/fluxplane/agentruntime/runtime/system"
+
+func Bad() string {
+	return system.Name
+}
+`)
+	writeEngineFile(t, root, "runtime/system/system.go", `package system
+
+import "net/http"
+
+const Name = "system"
+
+var Client = http.DefaultClient
+`)
+	writeEngineFile(t, root, "orchestration/session/session.go", `package session
+
+import (
+	"github.com/fluxplane/agentruntime/core/operation"
+	"github.com/fluxplane/agentruntime/runtime/system"
+)
+
+func Run() string {
+	return operation.Name + system.Name
+}
+`)
+	writeEngineFile(t, root, "plugins/integrations/slack/plugin.go", `package slack
+
+import "os"
+
+func Token() string {
+	return os.Getenv("SLACK_TOKEN")
+}
+`)
+	writeEngineFile(t, root, "experimental/foo/foo.go", `package foo
+
+const Name = "foo"
+`)
+
+	eng, err := New().
+		Roots(".").
+		WithFS(os.DirFS(root)).
+		WithLanguage(goast.New()).
+		Build(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := eng.Assess(context.Background(), AssessmentOptions{
+		Scope:        Scope{Language: Go},
+		Gates:        []AssessmentGate{AssessmentGateArchitecture},
+		Architecture: agentruntimeStyleArchitectureRules(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"architecture_boundary_violation", "architecture_plugin_host_effect", "architecture_unknown_package"} {
+		if !hasViolation(report, kind) {
+			t.Fatalf("expected %s in agentruntime-style policy report, got %#v", kind, report)
+		}
+	}
+	if !hasAllowedFinding(report, "architecture_fan_out") {
+		t.Fatalf("expected reviewed fan-out finding, got %#v", report.Findings)
+	}
+	if report.Scores.Boundary != 75 || report.Scores.SideEffect != 90 || report.Scores.Coverage != 80 || report.Scores.Coupling != 100 {
+		t.Fatalf("unexpected agentruntime-style component scores: %#v", report.Scores)
+	}
+}
+
 func TestEngineRejectsMultipleRootsForNow(t *testing.T) {
 	_, err := New().Roots("one", "two").WithLanguage(goast.New()).Build(context.Background())
 	if err == nil {
@@ -508,6 +604,89 @@ func hasCapability(spec BackendSpec, capability Capability, level CapabilityLeve
 		}
 	}
 	return false
+}
+
+func agentruntimeStyleArchitectureRules() *ArchitectureRules {
+	return &ArchitectureRules{
+		ModulePath: "github.com/fluxplane/agentruntime",
+		Layers: []ArchitectureLayer{
+			{Name: "facade", Prefixes: []string{"."}},
+			{Name: "core", Prefixes: []string{"core"}},
+			{Name: "sdk", Prefixes: []string{"sdk"}},
+			{Name: "runtime", Prefixes: []string{"runtime"}},
+			{Name: "orchestration", Prefixes: []string{"orchestration"}},
+			{Name: "adapters", Prefixes: []string{"adapters"}},
+			{Name: "plugins", Prefixes: []string{"plugins"}},
+			{Name: "apps", Prefixes: []string{"apps"}},
+			{Name: "cmd", Prefixes: []string{"cmd"}},
+		},
+		Dependencies: []ArchitectureDependencyRule{
+			{FromLayer: "core", ToLayer: "core"},
+			{FromLayer: "sdk", ToLayer: "core"},
+			{FromLayer: "sdk", ToLayer: "sdk"},
+			{FromLayer: "runtime", ToLayer: "core"},
+			{FromLayer: "runtime", ToLayer: "runtime"},
+			{FromLayer: "orchestration", ToLayer: "core"},
+			{FromLayer: "orchestration", ToLayer: "runtime"},
+			{FromLayer: "orchestration", ToLayer: "orchestration"},
+			{FromLayer: "adapters", ToLayer: "core"},
+			{FromLayer: "adapters", ToLayer: "runtime"},
+			{FromLayer: "adapters", ToLayer: "orchestration"},
+			{FromLayer: "adapters", ToLayer: "adapters"},
+			{FromLayer: "plugins", ToLayer: "core"},
+			{FromLayer: "plugins", ToLayer: "sdk"},
+			{FromLayer: "plugins", ToLayer: "runtime"},
+			{FromLayer: "plugins", ToLayer: "orchestration"},
+			{FromLayer: "plugins", ToLayer: "adapters"},
+			{FromLayer: "plugins", ToLayer: "plugins"},
+			{FromLayer: "apps", ToLayer: "core"},
+			{FromLayer: "apps", ToLayer: "sdk"},
+			{FromLayer: "apps", ToLayer: "runtime"},
+			{FromLayer: "apps", ToLayer: "orchestration"},
+			{FromLayer: "apps", ToLayer: "adapters"},
+			{FromLayer: "apps", ToLayer: "plugins"},
+			{FromLayer: "apps", ToLayer: "apps"},
+			{FromLayer: "apps", ToLayer: "facade"},
+			{FromLayer: "cmd", ToLayer: "apps"},
+			{FromLayer: "cmd", ToLayer: "adapters"},
+			{FromLayer: "cmd", ToLayer: "cmd"},
+			{FromLayer: "facade", ToLayer: "core"},
+			{FromLayer: "facade", ToLayer: "sdk"},
+			{FromLayer: "facade", ToLayer: "runtime"},
+			{FromLayer: "facade", ToLayer: "orchestration"},
+			{FromLayer: "facade", ToLayer: "adapters"},
+		},
+		Effects: []ArchitectureEffectRule{
+			{
+				Name:    "inner_host_io",
+				Scope:   ArchitectureScope{Layers: []string{"core", "sdk", "orchestration"}},
+				Imports: []string{"os", "os/exec", "syscall", "net", "net/http", "net/url", "database/sql"},
+				Reason:  "inner production layers must not import host IO directly",
+			},
+			{
+				Name:    "runtime_host_io",
+				Scope:   ArchitectureScope{Layers: []string{"runtime"}},
+				Imports: []string{"os", "os/exec", "os/user", "syscall", "net", "net/http", "net/url", "database/sql", "path/filepath"},
+				Reason:  "runtime host IO imports require an explicit package allowlist reason",
+			},
+			{
+				Name:   "plugin_host_effect",
+				Scope:  ArchitectureScope{Layers: []string{"plugins"}},
+				Calls:  []ArchitectureCallRule{{Import: "os", Symbol: "Getenv"}, {Import: "os/exec", Symbol: "Command"}, {Import: "net/http", Symbol: "Get"}},
+				Reason: "plugin host side effects must go through the project-defined system boundary",
+			},
+		},
+		Coupling: ArchitectureCouplingRules{
+			FanOutThreshold: 2,
+			Layers:          []string{"core", "runtime", "orchestration"},
+			ReviewedFanOut: []ArchitecturePackageNote{
+				{Package: "core/resource", Reason: "resource owns the inert contribution bundle, index, and resolver hub"},
+			},
+		},
+		Exceptions: []ArchitectureException{
+			{Kind: "architecture_runtime_host_io", Package: "runtime/system", Reason: "system runtime is the central host side-effect boundary"},
+		},
+	}
 }
 
 func writeEngineFile(t *testing.T, root, name, content string) {
