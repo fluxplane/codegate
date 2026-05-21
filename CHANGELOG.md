@@ -1,5 +1,66 @@
 # Changelog
 
+## v1.0.0 - 2026-05-22
+
+### Highlights
+
+- Normalized Go assessment scoring across soft quality categories so scores
+  move with finding density instead of saturated raw counts.
+- Normalized Markdown assessment scoring for structural findings, debt markers,
+  and validation-diagnostic drag using document, heading, and line denominators.
+- Improved this repository's Go quality signal from `55 C+` before cleanup to
+  `95 A+` after quality cleanup and normalized scoring.
+- Added score invariant tests covering density, severity weighting, pressure,
+  coupling, architecture policy soft penalties, and normalized component
+  aggregation.
+
+### Changed
+
+- Go scoring model is now `go-architecture-v1`.
+- Markdown scoring model is now `markdown-structure-v1`.
+- Go soft scoring now normalizes maintainability findings, suggestions,
+  pressure, coupling fan-out, architecture policy soft findings, safety/security
+  side-effect findings, and final violation drag where a denominator exists.
+- Markdown metrics now include `document_count`, `heading_count`, and
+  `line_count` for normalized structural scoring.
+- README quality badge now reflects the current Go assessment: `95 A+`.
+
+### Fixed
+
+- Reduced noisy Go performance findings by adding missing slice capacities and
+  avoiding numeric `+=` false positives in string-concatenation detection.
+- Added public facade documentation comments to reduce undocumented-export
+  findings while preserving the public API surface.
+
+### Breaking Changes
+
+- Assessment score values and rating outputs may change for the same input
+  repository because Go and Markdown score models now use normalized density and
+  severity weighting instead of several raw-count penalties.
+- Consumers that compare exact scores, score deltas, or `provider_score_model`
+  values should update expectations from `go-architecture-v0` and
+  `markdown-structure-v0` to the v1 model identifiers.
+
+### Upgrade Notes
+
+- Prefer score and rating thresholds over exact score snapshots in automation.
+- Use the reported score model and denominator metrics when comparing assessment
+  output across releases.
+- Hard architecture boundary/test-boundary failures and no-file coverage
+  failures remain hard gates rather than normalized soft penalties.
+
+### Validation
+
+- `go test ./...`
+- `git diff --check`
+- `go run ./cmd/codegate --root . --language go capabilities`
+- `go run ./cmd/codegate --root . --language markdown assess --gate all`
+- `go run ./cmd/codegate --root . --language go assess --gate all --suggestions 3`
+- `go run ./cmd/codegate --root . --language go assess --gate all --view full --suggestions 3`
+- `go run ./cmd/codegate --root . --language go assess --gate all --summary-only`
+- `go run ./cmd/codegate --root . --language go --format html assess --gate all > /tmp/codegate-release-report.html`
+- `go run ./cmd/codegate --root . --language go assess --gate architecture --rules examples/agentruntime-architecture.rules.json --summary-only`
+
 ## v0.3.0 - 2026-05-21
 
 ### Highlights
