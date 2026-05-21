@@ -223,6 +223,28 @@ codegate --root . --language markdown cycle --apply-first
 
 `assess` defaults to the compact agent view: scores, rating, compact metrics, counts, and small top lists without full evidence payloads. Use `--view full` for complete JSON reports and `--view summary` or `--summary-only` for the smallest score/count payload. Use `--format html` for a standalone browser report with expandable evidence blocks, CDN-backed syntax highlighting, and the full JSON report embedded behind a `Download JSON` link.
 
+## Claude Code Plugin
+
+This repository includes a Claude Code plugin bundle in [`plugins/codegate`](plugins/codegate). It exposes:
+
+- skill: `codegate:codegate-workflow`
+- command: `/codegate:assess`
+- agent: `codegate:reviewer`
+
+Load it directly from a checkout:
+
+```sh
+claude --plugin-dir ./plugins/codegate
+```
+
+Validate the bundle before publishing changes:
+
+```sh
+claude plugin validate ./plugins/codegate
+```
+
+Claude Code currently installs persistent plugins through marketplaces. For direct use from GitHub, clone or sparse-checkout this repository and pass the plugin directory with `--plugin-dir`.
+
 ## Quality Badges
 
 CI systems can turn the JSON report into a README badge. Badges should name the assessed language, because each language backend declares its own available metrics and findings. A simple static Go badge convention is:

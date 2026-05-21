@@ -62,3 +62,25 @@
   when present.
 - Verify that the changelog version, annotated tag, and GitHub release version
   all match exactly.
+
+## Claude Code Plugin
+
+- The Claude Code plugin bundle lives in `plugins/codegate`.
+- Keep the plugin self-contained:
+  - `plugins/codegate/.claude-plugin/plugin.json`
+  - `plugins/codegate/skills/`
+  - `plugins/codegate/commands/`
+  - `plugins/codegate/agents/`
+- Do not add a root `.claude-plugin/marketplace.json` unless the user
+  explicitly asks to make this repository a Claude plugin marketplace.
+- Validate plugin changes before committing or releasing:
+  ```sh
+  claude plugin validate ./plugins/codegate
+  ```
+- Test local loading with:
+  ```sh
+  claude --plugin-dir ./plugins/codegate agents
+  ```
+- Claude Code persistent installs currently go through marketplaces. For direct
+  repository use, document `--plugin-dir` against a local checkout or sparse
+  checkout of `plugins/codegate`.
