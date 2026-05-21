@@ -128,7 +128,8 @@ func (b *EngineBuilder) Build(ctx context.Context) (Engine, error) {
 	if len(b.backends) == 0 {
 		return nil, errors.New("codegate: engine requires at least one language backend")
 	}
-	opts := []Option{withLanguages(b.languages)}
+	opts := make([]Option, 0, len(b.backends)+len(b.validationAdapters)+2)
+	opts = append(opts, withLanguages(b.languages))
 	if b.source != nil {
 		opts = append(opts, WithSource(b.source))
 	} else {

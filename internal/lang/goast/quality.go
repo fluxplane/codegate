@@ -663,7 +663,7 @@ func (c *goQualityCollector) collectAssignSmells(assign *ast.AssignStmt, loopDep
 	for _, lhs := range assign.Lhs {
 		c.collectExprSmells(lhs, loopDepth)
 	}
-	if loopDepth > 0 && assign.Tok == token.ADD_ASSIGN {
+	if loopDepth > 0 && assign.Tok == token.ADD_ASSIGN && addAssignHasStringOperand(assign) {
 		c.report.metrics.StringConcatInLoopCount++
 		c.addFinding("performance_string_concat_in_loop", "info", Location{URI: c.pf.path, Range: rangeOf(c.pf.fset, assign.Pos(), assign.End())}, "",
 			"Compound append-style assignment inside a loop may repeatedly allocate when used for strings.",
@@ -684,6 +684,28 @@ func (c *goQualityCollector) collectAssignSmells(assign *ast.AssignStmt, loopDep
 			"Assignment discards a call result with blank identifier; verify no error is ignored.",
 			map[string]float64{"count": 1})
 	}
+}
+
+func addAssignHasStringOperand(assign *ast.AssignStmt) bool {
+	for _, expr := range assign.Rhs {
+		if exprContainsStringLiteral(expr) {
+			return true
+		}
+	}
+	return false
+}
+
+func exprContainsStringLiteral(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if ok && lit.Kind == token.STRING {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
 }
 
 func (c *goQualityCollector) collectExprSmells(expr ast.Expr, loopDepth int) {
@@ -1125,7 +1147,7 @@ func mergeBoolMaps(dst *map[string]bool, src map[string]bool) {
 }
 
 func sortedBoolMapKeys(values map[string]bool) []string {
-	var out []string
+	out := make([]string, 0, len(values))
 	for key, value := range values {
 		if value {
 			out = append(out, key)

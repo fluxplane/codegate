@@ -625,7 +625,8 @@ func (c editCompiler) compileRenameGoModulePath(ctx context.Context, op RenameGo
 	if err != nil {
 		return nil, err
 	}
-	out := []FileEdit{{Path: "go.mod", Edits: []TextEdit{modEdit}}}
+	out := make([]FileEdit, 0, len(files)+1)
+	out = append(out, FileEdit{Path: "go.mod", Edits: []TextEdit{modEdit}})
 	for _, p := range files {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -1611,7 +1612,7 @@ func paramRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
 	if fields == nil {
 		return nil
 	}
-	var out []Range
+	out := make([]Range, 0, len(fields.List))
 	for _, field := range fields.List {
 		out = append(out, rangeOf(fset, field.Pos(), field.End()))
 	}
@@ -1622,7 +1623,7 @@ func namedParamRanges(fset *token.FileSet, fields *ast.FieldList) []rangeItem {
 	if fields == nil {
 		return nil
 	}
-	var out []rangeItem
+	out := make([]rangeItem, 0, len(fields.List))
 	for _, field := range fields.List {
 		if len(field.Names) == 0 {
 			continue
@@ -1638,7 +1639,7 @@ func fieldRanges(fset *token.FileSet, fields *ast.FieldList) []Range {
 	if fields == nil {
 		return nil
 	}
-	var out []Range
+	out := make([]Range, 0, len(fields.List))
 	for _, field := range fields.List {
 		out = append(out, rangeOf(fset, field.Pos(), field.End()))
 	}
@@ -1791,7 +1792,7 @@ func (c editCompiler) structFieldUsageEdits(ctx context.Context, idx *index, sym
 			return true
 		})
 	}
-	var out []FileEdit
+	out := make([]FileEdit, 0, len(byPath))
 	for p, edits := range byPath {
 		out = append(out, FileEdit{Path: p, Edits: edits})
 	}
@@ -1885,7 +1886,7 @@ func functionParameterNames(fn *ast.FuncDecl) []string {
 	if fn.Type == nil || fn.Type.Params == nil {
 		return nil
 	}
-	var out []string
+	out := make([]string, 0, len(fn.Type.Params.List))
 	for _, field := range fn.Type.Params.List {
 		for _, name := range field.Names {
 			out = append(out, name.Name)
@@ -2062,7 +2063,7 @@ func (c editCompiler) callArgumentEdits(ctx context.Context, idx *index, target 
 			return true
 		})
 	}
-	var out []FileEdit
+	out := make([]FileEdit, 0, len(byPath))
 	for p, edits := range byPath {
 		for _, edit := range edits {
 			if edit.Range.Start.Offset < 0 {
@@ -2136,8 +2137,8 @@ func (c editCompiler) moveImportEdits(ctx context.Context, sym Symbol, sourceTex
 	remaining = append(remaining, src[deleteRange.End.Offset:]...)
 	remainingQualifiers := selectorQualifierNames(string(remaining))
 
-	var targetImports []importNeed
-	var sourceRemovals []TextEdit
+	targetImports := make([]importNeed, 0, len(sourcePF.file.Imports))
+	sourceRemovals := make([]TextEdit, 0, len(sourcePF.file.Imports))
 	for _, imp := range sourcePF.file.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -2159,7 +2160,7 @@ func (c editCompiler) moveImportEdits(ctx context.Context, sym Symbol, sourceTex
 			})
 		}
 	}
-	var out []FileEdit
+	out := make([]FileEdit, 0, len(targetImports)+len(sourceRemovals))
 	if len(targetImports) > 0 {
 		edit, err := ensureImportsEdit(targetPF, targetImports)
 		if err != nil {
@@ -2385,7 +2386,7 @@ func removeImportRange(pf parsedFile, imp *ast.ImportSpec) Range {
 }
 
 func importDecls(pf parsedFile) []*ast.GenDecl {
-	var out []*ast.GenDecl
+	out := make([]*ast.GenDecl, 0, len(pf.file.Decls))
 	for _, decl := range pf.file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
 		if ok && gen.Tok == token.IMPORT {

@@ -2,6 +2,8 @@ package codegate
 
 import "github.com/fluxplane/codegate/internal/core"
 
+// Core model aliases expose the shared codegate data model from the public
+// package while keeping the implementation types in internal/core.
 type (
 	LanguageID        = core.LanguageID
 	BackendInfo       = core.BackendInfo
@@ -58,23 +60,29 @@ type (
 	ChangedFile       = core.ChangedFile
 )
 
+// Validation kind aliases identify the validation passes a backend or adapter
+// can perform.
 const (
 	ValidationParse     = core.ValidationParse
 	ValidationTypecheck = core.ValidationTypecheck
 	ValidationExternal  = core.ValidationExternal
 )
 
+// Import direction aliases select direct, reverse, or combined dependency
+// queries.
 const (
 	ImportDirectionDirect  = core.ImportDirectionDirect
 	ImportDirectionReverse = core.ImportDirectionReverse
 	ImportDirectionBoth    = core.ImportDirectionBoth
 )
 
+// Language aliases identify the language backend used for a request.
 const (
 	Go       = core.Go
 	Markdown = core.Markdown
 )
 
+// Capability aliases describe backend feature categories.
 const (
 	CapabilityLookup         = core.CapabilityLookup
 	CapabilityStaticAnalysis = core.CapabilityStaticAnalysis
@@ -85,6 +93,7 @@ const (
 	CapabilityReporting      = core.CapabilityReporting
 )
 
+// Capability level aliases describe how complete a backend feature is.
 const (
 	CapabilityNone         = core.CapabilityNone
 	CapabilityBasic        = core.CapabilityBasic
@@ -92,6 +101,7 @@ const (
 	CapabilityExperimental = core.CapabilityExperimental
 )
 
+// Symbol kind aliases classify indexed declarations and references.
 const (
 	SymbolModule      = core.SymbolModule
 	SymbolPackage     = core.SymbolPackage
@@ -114,6 +124,7 @@ const (
 	SymbolLocal       = core.SymbolLocal
 )
 
+// Occurrence kind aliases classify how a symbol appears at a location.
 const (
 	OccurrenceDeclaration = core.OccurrenceDeclaration
 	OccurrenceDefinition  = core.OccurrenceDefinition
@@ -126,6 +137,7 @@ const (
 	OccurrenceDoc         = core.OccurrenceDoc
 )
 
+// Edge kind aliases classify relationships between indexed symbols.
 const (
 	EdgeContains   = core.EdgeContains
 	EdgeDeclares   = core.EdgeDeclares

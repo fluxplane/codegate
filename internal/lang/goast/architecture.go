@@ -87,7 +87,7 @@ func architectureDependencyViolations(idx *index, packages map[string]architectu
 	if len(rules.Dependencies) == 0 {
 		return nil
 	}
-	var out []Violation
+	out := make([]Violation, 0, len(idx.imports))
 	for _, imp := range idx.imports {
 		from := packages[imp.FromUnit]
 		toLayer := architectureLayerForPackage(imp.Import, rules.ModulePath, rules)
@@ -116,7 +116,7 @@ func architectureUnknownPackageViolations(packages map[string]architecturePackag
 	if len(rules.Layers) == 0 || rules.ModulePath == "" {
 		return nil
 	}
-	var out []Violation
+	out := make([]Violation, 0, len(packages))
 	for _, pkg := range packages {
 		if pkg.layer != "" || !architectureInModule(pkg.importPath, rules.ModulePath) {
 			continue
@@ -135,7 +135,7 @@ func architectureUnknownPackageViolations(packages map[string]architecturePackag
 }
 
 func architectureEffectImportViolations(idx *index, packages map[string]architecturePackage, rules *ArchitectureRules) []Violation {
-	var out []Violation
+	out := make([]Violation, 0, len(idx.imports))
 	for _, rule := range rules.Effects {
 		if len(rule.Imports) == 0 {
 			continue
@@ -231,7 +231,7 @@ func architectureCouplingFindings(idx *index, packages map[string]architecturePa
 		}
 		fanOut[pkg.importPath]++
 	}
-	var out []Finding
+	out := make([]Finding, 0, len(packages))
 	for _, pkg := range packages {
 		if len(rules.Coupling.Layers) > 0 && !architectureStringIn(rules.Coupling.Layers, pkg.layer) {
 			continue

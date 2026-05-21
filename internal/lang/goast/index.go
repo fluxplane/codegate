@@ -108,7 +108,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 		fileUnits: map[string]string{},
 		fileLOC:   map[string]int{},
 	}
-	var parsed []parsedFile
+	parsed := make([]parsedFile, 0, len(files))
 	for _, p := range files {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -161,7 +161,7 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 }
 
 func goDebtMarkers(p string, src []byte, fset *token.FileSet, file *ast.File) []core.DebtMarker {
-	var out []core.DebtMarker
+	out := make([]core.DebtMarker, 0, len(file.Comments))
 	for _, group := range file.Comments {
 		for _, comment := range group.List {
 			start := fset.Position(comment.Pos()).Offset
@@ -749,7 +749,7 @@ func computeMetrics(idx *index) []UnitMetrics {
 			}
 		}
 	}
-	var out []UnitMetrics
+	out := make([]UnitMetrics, 0, len(metrics))
 	for _, m := range metrics {
 		m.PressureScore = float64(3*m.DirectFanIn + 2*m.CallFanIn + m.PublicSymbolCount + m.FileCount + m.ImplementationCount)
 		m.Evidence = []Evidence{{Kind: "pressure_score", Message: "score is based on fan-in, call fan-in, public symbols, file count, and implementations"}}

@@ -144,7 +144,7 @@ func markdownSuggestions(ctx context.Context, snapshot Snapshot, scope Scope) ([
 	if err != nil {
 		return nil, err
 	}
-	var proposals []Proposal
+	proposals := make([]Proposal, 0, len(idx.files))
 	for _, file := range idx.files {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -186,7 +186,7 @@ func markdownDebtMarkerSuggestions(idx *index) []Proposal {
 }
 
 func markdownFileSuggestions(file markdownFile) []Proposal {
-	var out []Proposal
+	out := make([]Proposal, 0, len(file.headings))
 	h1Count := 0
 	for _, heading := range file.headings {
 		if heading.level == 1 {
@@ -249,7 +249,7 @@ func brokenLinkSuggestions(file markdownFile) []Proposal {
 		anchors[strings.TrimPrefix(heading.qualified, file.path+"#")] = true
 		anchors[heading.anchor] = true
 	}
-	var out []Proposal
+	out := make([]Proposal, 0, len(file.links))
 	for _, link := range file.links {
 		dest := strings.TrimSpace(link.destination)
 		if dest == "" || anchors[dest] {
@@ -276,7 +276,7 @@ func duplicateHeadingSuggestions(file markdownFile) []Proposal {
 		linkTargets[strings.TrimSpace(link.destination)] = true
 	}
 	seen := map[string]int{}
-	var out []Proposal
+	out := make([]Proposal, 0, len(file.headings))
 	for _, heading := range file.headings {
 		seen[heading.anchor]++
 		if seen[heading.anchor] <= 1 {

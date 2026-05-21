@@ -241,7 +241,7 @@ func (e *Editor) References(ctx context.Context, sel SymbolSelector) ([]Occurren
 	for _, sym := range targets {
 		targetIDs[sym.ID] = true
 	}
-	var out []Occurrence
+	out := make([]Occurrence, 0, len(idx.Occurrences))
 	for _, occ := range idx.Occurrences {
 		if targetIDs[occ.SymbolID] {
 			out = append(out, occ)
@@ -270,7 +270,7 @@ func (e *Editor) ReferencesAt(ctx context.Context, pos PositionSelector, opts Re
 		return nil, err
 	}
 	targetID := nav.Symbols[0].ID
-	refs := make([]Occurrence, 0)
+	refs := make([]Occurrence, 0, len(idx.Occurrences))
 	for _, occ := range idx.Occurrences {
 		if occ.SymbolID != targetID || !referenceInScope(idx, occ, opts.Scope) {
 			continue
@@ -308,7 +308,7 @@ func (e *Editor) Implementations(ctx context.Context, sel SymbolSelector) ([]Imp
 		return nil, err
 	}
 	targets := core.FilterSymbols(idx.Symbols, sel)
-	var out []Implementation
+	out := make([]Implementation, 0, len(idx.Edges))
 	for _, target := range targets {
 		if target.Kind != SymbolInterface {
 			continue
@@ -335,7 +335,7 @@ func (e *Editor) Callers(ctx context.Context, sel SymbolSelector) ([]CallEdge, e
 	for _, sym := range targets {
 		targetIDs[string(sym.ID)] = true
 	}
-	var out []CallEdge
+	out := make([]CallEdge, 0, len(idx.Edges))
 	for _, edge := range idx.Edges {
 		if edge.Kind != EdgeCalls || !targetIDs[edge.To] {
 			continue
@@ -359,7 +359,7 @@ func (e *Editor) Callees(ctx context.Context, sel SymbolSelector) ([]CallEdge, e
 	for _, sym := range targets {
 		targetIDs[string(sym.ID)] = true
 	}
-	var out []CallEdge
+	out := make([]CallEdge, 0, len(idx.Edges))
 	for _, edge := range idx.Edges {
 		if edge.Kind != EdgeCalls || !targetIDs[edge.From] {
 			continue
@@ -401,7 +401,8 @@ func (e *Editor) ImportGraph(ctx context.Context, query ImportQuery) (ImportResu
 		direction = ImportDirectionBoth
 	}
 	target := query.ImportPath
-	var direct, reverse []ImportEdge
+	direct := make([]ImportEdge, 0, len(idx.Imports))
+	reverse := make([]ImportEdge, 0, len(idx.Imports))
 	for _, imp := range idx.Imports {
 		fromMatches := true
 		if query.Path != "" {
@@ -714,7 +715,7 @@ func (e *Editor) selectedBackends(scope Scope) []Backend {
 		}
 		return nil
 	}
-	var out []Backend
+	out := make([]Backend, 0, len(e.languages))
 	for _, lang := range e.languages {
 		if backend, ok := e.backends[lang]; ok {
 			out = append(out, backend)
@@ -788,7 +789,7 @@ func (e *Editor) listFiles(scope Scope, overlay map[string][]byte) ([]string, er
 	root := core.CleanPath(firstNonEmpty(scope.Path, scope.Root, e.root))
 	scopePath := core.CleanPath(scope.Path)
 	seen := map[string]bool{}
-	var files []string
+	files := make([]string, 0, len(e.overlay))
 	err := fs.WalkDir(e.fsys, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil

@@ -95,7 +95,7 @@ func summarizeMarkdownAssessmentSuggestions(proposals []Proposal, limit int) []A
 }
 
 func markdownFindings(idx *index, opts AssessmentOptions) []Finding {
-	var out []Finding
+	out := make([]Finding, 0, len(idx.files))
 	if markdownGateEnabled(opts, AssessmentGateCoverage) && len(idx.documents) == 0 {
 		out = append(out, Finding{
 			Kind:     "coverage_no_markdown_files",
@@ -144,7 +144,7 @@ func markdownDebtMarkerSeverity(marker string) string {
 }
 
 func markdownFileFindings(file markdownFile) []Finding {
-	var out []Finding
+	out := make([]Finding, 0, len(file.headings))
 	h1Count := 0
 	anchorCounts := map[string]int{}
 	for i, heading := range file.headings {
@@ -232,7 +232,7 @@ func markdownViolations(validation ValidationResult, opts AssessmentOptions) []V
 	if !markdownGateEnabled(opts, AssessmentGateSafety) {
 		return nil
 	}
-	var out []Violation
+	out := make([]Violation, 0, len(validation.Diagnostics))
 	for _, diagnostic := range validation.Diagnostics {
 		out = append(out, Violation{
 			Kind:     "safety_validation_diagnostic",

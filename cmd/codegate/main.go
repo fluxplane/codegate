@@ -661,7 +661,7 @@ func parseAssessmentGates(values []string) ([]codegate.AssessmentGate, error) {
 		return []codegate.AssessmentGate{codegate.AssessmentGateAll}, nil
 	}
 	seen := map[codegate.AssessmentGate]bool{}
-	var out []codegate.AssessmentGate
+	out := make([]codegate.AssessmentGate, 0, len(values))
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			part = strings.TrimSpace(part)
@@ -688,7 +688,7 @@ func parseAssessmentGates(values []string) ([]codegate.AssessmentGate, error) {
 
 func parseAssessmentFailureCategories(values []string) ([]string, error) {
 	seen := map[string]bool{}
-	var out []string
+	out := make([]string, 0, len(values))
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			part = strings.TrimSpace(part)

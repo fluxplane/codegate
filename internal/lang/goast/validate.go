@@ -112,7 +112,7 @@ func packageLoaderTypecheckDiagnostics(ctx context.Context, snapshot Snapshot, s
 	if err != nil {
 		return nil, false, err
 	}
-	var out []Diagnostic
+	out := make([]Diagnostic, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		for _, err := range pkg.Errors {
 			diag := packageErrorDiagnostic(err, root)
@@ -269,8 +269,8 @@ func CallSiteLimitations(ctx context.Context, snapshot Snapshot, scope Scope) (L
 }
 
 func parseValidationFiles(ctx context.Context, snapshot Snapshot, paths []string) ([]validationFile, []Diagnostic, error) {
-	var parsed []validationFile
-	var diagnostics []Diagnostic
+	parsed := make([]validationFile, 0, len(paths))
+	diagnostics := make([]Diagnostic, 0, len(paths))
 	for _, p := range paths {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()

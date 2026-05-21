@@ -62,7 +62,7 @@ func (e *Editor) resolvePositionTarget(idx *core.Index, filePath string, offset 
 }
 
 func sortedOccurrencesAt(occurrences []Occurrence, filePath string, offset int) []Occurrence {
-	var out []Occurrence
+	out := make([]Occurrence, 0, len(occurrences))
 	for _, occ := range occurrences {
 		if core.CleanPath(occ.Location.URI) != filePath {
 			continue
@@ -76,7 +76,7 @@ func sortedOccurrencesAt(occurrences []Occurrence, filePath string, offset int) 
 }
 
 func sortedSymbolsAt(symbols []Symbol, filePath string, offset int, selectionOnly bool) []Symbol {
-	var out []Symbol
+	out := make([]Symbol, 0, len(symbols))
 	for _, sym := range symbols {
 		if core.CleanPath(sym.Location.URI) != filePath {
 			continue
@@ -94,7 +94,7 @@ func sortedSymbolsAt(symbols []Symbol, filePath string, offset int, selectionOnl
 }
 
 func enclosingSymbol(symbols []Symbol, filePath string, offset int, exclude SymbolID) Symbol {
-	var candidates []Symbol
+	candidates := make([]Symbol, 0, len(symbols))
 	for _, sym := range symbols {
 		if sym.ID == exclude || core.CleanPath(sym.Location.URI) != filePath {
 			continue

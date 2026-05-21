@@ -342,7 +342,7 @@ func writeChangedFiles(ctx context.Context, root string, files []codegate.Change
 	if err != nil {
 		return nil, err
 	}
-	var written []string
+	written := make([]string, 0, len(files))
 	for _, file := range files {
 		if ctx.Err() != nil {
 			return written, ctx.Err()

@@ -50,7 +50,7 @@ func computeMetrics(idx *core.Index) []UnitMetrics {
 			}
 		}
 	}
-	var out []UnitMetrics
+	out := make([]UnitMetrics, 0, len(metrics))
 	for _, m := range metrics {
 		m.PressureScore = float64(3*m.DirectFanIn + 2*m.CallFanIn + m.PublicSymbolCount + m.FileCount + m.ImplementationCount)
 		m.Evidence = []Evidence{{Kind: "pressure_score", Message: "score is based on fan-in, call fan-in, public symbols, file count, and implementations"}}
@@ -102,7 +102,7 @@ func computeSymbolMetrics(idx *core.Index) []SymbolMetrics {
 			}
 		}
 	}
-	var out []SymbolMetrics
+	out := make([]SymbolMetrics, 0, len(metrics))
 	for _, m := range metrics {
 		m.PressureScore = float64(m.ReferenceCount + 2*m.CallFanIn + m.CallFanOut + m.ImplementationCount)
 		if m.PressureScore > 0 {

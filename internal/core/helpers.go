@@ -15,7 +15,7 @@ func SelectorScope(sel SymbolSelector) Scope {
 }
 
 func FilterSymbols(symbols []Symbol, sel SymbolSelector) []Symbol {
-	var out []Symbol
+	out := make([]Symbol, 0, len(symbols))
 	for _, sym := range symbols {
 		if sel.ID != "" && sym.ID != sel.ID {
 			continue
@@ -78,7 +78,7 @@ func HasTestPath(p string) bool {
 }
 
 func ImportsForPath(imports []ImportEdge, p string) []ImportEdge {
-	var out []ImportEdge
+	out := make([]ImportEdge, 0, len(imports))
 	for _, imp := range imports {
 		if CleanPath(imp.FromPath) == CleanPath(p) {
 			out = append(out, imp)
@@ -189,7 +189,7 @@ func cleanSlashPath(p string) string {
 }
 
 func splitSlash(p string) []string {
-	var out []string
+	out := make([]string, 0, len(p))
 	start := 0
 	for i, c := range p {
 		if c == '/' {

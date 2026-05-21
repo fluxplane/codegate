@@ -28,7 +28,7 @@ func FindDebtMarkers(path string, src []byte) []DebtMarker {
 }
 
 func FindMarkdownDebtMarkers(path string, src []byte) []DebtMarker {
-	var out []DebtMarker
+	out := make([]DebtMarker, 0, len(debtMarkerKinds))
 	inFence := false
 	lineStart := 0
 	for lineStart <= len(src) {
@@ -55,7 +55,7 @@ func findMarkdownLineDebtMarkers(path string, src []byte, lineStart, lineEnd int
 	line := string(src[lineStart:lineEnd])
 	masked := maskMarkdownInlineCode(line)
 	upper := strings.ToUpper(masked)
-	var out []DebtMarker
+	out := make([]DebtMarker, 0, len(debtMarkerKinds))
 	for _, marker := range debtMarkerKinds {
 		idx := debtMarkerIndex(upper, marker)
 		if idx < 0 {
@@ -106,7 +106,7 @@ func CountDebtMarkers(markers []DebtMarker) map[string]int {
 }
 
 func findDebtMarkers(path string, src []byte, start, end int) []DebtMarker {
-	var out []DebtMarker
+	out := make([]DebtMarker, 0, len(debtMarkerKinds))
 	lineStart := start
 	for lineStart <= end {
 		lineEnd := lineStart

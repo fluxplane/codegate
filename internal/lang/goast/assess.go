@@ -97,7 +97,7 @@ func goAssessmentMetrics(idx *index, opts AssessmentOptions) map[string]interfac
 }
 
 func goAssessmentFindings(idx *index, units []UnitMetrics, validation ValidationResult, opts AssessmentOptions) []Finding {
-	var out []Finding
+	out := make([]Finding, 0, len(units)+len(idx.imports))
 	if assessmentGateEnabled(opts, AssessmentGateCoverage) && len(idx.documents) == 0 {
 		out = append(out, Finding{
 			Kind:     "coverage_no_go_files",
@@ -190,7 +190,7 @@ func goQualityFindings(idx *index, opts AssessmentOptions) []Finding {
 }
 
 func goAssessmentViolations(validation ValidationResult, opts AssessmentOptions) []Violation {
-	var out []Violation
+	out := make([]Violation, 0, len(validation.Diagnostics))
 	if assessmentGateEnabled(opts, AssessmentGateSafety) {
 		for _, diagnostic := range validation.Diagnostics {
 			out = append(out, Violation{
@@ -238,7 +238,7 @@ func goArchitectureViolations(idx *index, opts AssessmentOptions) []Violation {
 	if !assessmentGateEnabled(opts, AssessmentGateArchitecture) || opts.Architecture == nil {
 		return nil
 	}
-	out := make([]Violation, 0)
+	out := make([]Violation, 0, len(idx.imports))
 	for _, imp := range idx.imports {
 		if rule, denied := deniedArchitectureImport(imp, opts.Architecture.Imports); denied {
 			out = append(out, architectureImportViolation("architecture_denied_import", imp, rule))

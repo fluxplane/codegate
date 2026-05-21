@@ -2,6 +2,8 @@ package codegate
 
 import "github.com/fluxplane/codegate/internal/core"
 
+// Operation aliases expose supported edit operations from the public package
+// while keeping the concrete model in internal/core.
 type (
 	Operation                 = core.Operation
 	OperationKind             = core.OperationKind
@@ -43,6 +45,7 @@ type (
 	RenameMarkdownHeading     = core.RenameMarkdownHeading
 )
 
+// Operation kind aliases identify the edit operation encoded in an Operation.
 const (
 	OpRenameSymbol              = core.OpRenameSymbol
 	OpReplaceSymbol             = core.OpReplaceSymbol

@@ -41,6 +41,8 @@ type LookupResult struct {
 	Warnings       []string         `json:"warnings,omitempty"`
 }
 
+// Assessment aliases expose report, gate, finding, violation, and architecture
+// policy models from the public package.
 type (
 	AssessmentGate             = core.AssessmentGate
 	AssessmentOptions          = core.AssessmentOptions
@@ -65,6 +67,8 @@ type (
 	AssessmentProvider         = core.AssessmentProvider
 )
 
+// Assessment gate and architecture rule aliases identify supported quality
+// gates and policy actions.
 const (
 	AssessmentGateAll             = core.AssessmentGateAll
 	AssessmentGateArchitecture    = core.AssessmentGateArchitecture

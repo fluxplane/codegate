@@ -70,7 +70,7 @@ func suggestUnusedPrivate(ctx context.Context, snapshot Snapshot, idx *index) ([
 		}
 		used[occ.SymbolID] = true
 	}
-	var out []Proposal
+	out := make([]Proposal, 0, len(idx.symbols))
 	for _, sym := range idx.symbols {
 		if sym.Kind == SymbolField || sym.Kind == SymbolMethod || sym.Kind == SymbolPackage || isExported(sym.Name) || used[sym.ID] {
 			continue
@@ -117,7 +117,7 @@ func isGoEntrypoint(sym Symbol) bool {
 }
 
 func suggestLargeFunctions(idx *index) []Proposal {
-	var out []Proposal
+	out := make([]Proposal, 0, len(idx.symbols))
 	for _, sym := range idx.symbols {
 		if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod {
 			continue
@@ -144,7 +144,7 @@ func suggestLargeFunctions(idx *index) []Proposal {
 }
 
 func suggestLargeParameterLists(idx *index) []Proposal {
-	var out []Proposal
+	out := make([]Proposal, 0, len(idx.symbols))
 	for _, sym := range idx.symbols {
 		if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod {
 			continue
@@ -171,7 +171,7 @@ func suggestLargeParameterLists(idx *index) []Proposal {
 }
 
 func suggestBooleanFlags(idx *index) []Proposal {
-	var out []Proposal
+	out := make([]Proposal, 0, len(idx.symbols))
 	for _, sym := range idx.symbols {
 		if sym.Kind != SymbolFunction && sym.Kind != SymbolMethod {
 			continue
@@ -196,8 +196,9 @@ func suggestBooleanFlags(idx *index) []Proposal {
 }
 
 func suggestHighFanIn(idx *index) []Proposal {
-	var out []Proposal
-	for _, metric := range computeMetrics(idx) {
+	metrics := computeMetrics(idx)
+	out := make([]Proposal, 0, len(metrics))
+	for _, metric := range metrics {
 		if metric.DirectFanIn < 3 && metric.CallFanIn < 5 {
 			continue
 		}
@@ -220,7 +221,7 @@ func suggestHighFanIn(idx *index) []Proposal {
 
 func suggestHighPressureSymbols(idx *index) []Proposal {
 	metrics := computeSymbolMetrics(idx)
-	var out []Proposal
+	out := make([]Proposal, 0, len(metrics))
 	for _, metric := range metrics {
 		if metric.ReferenceCount < 5 && metric.CallFanIn < 5 {
 			continue
@@ -308,7 +309,7 @@ func computeSymbolMetrics(idx *index) []SymbolMetrics {
 			}
 		}
 	}
-	var out []SymbolMetrics
+	out := make([]SymbolMetrics, 0, len(metrics))
 	for _, m := range metrics {
 		m.PressureScore = float64(m.ReferenceCount + 2*m.CallFanIn + m.CallFanOut + m.ImplementationCount)
 		if m.PressureScore > 0 {
