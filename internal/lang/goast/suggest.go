@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sort"
 	"strings"
 )
 
@@ -19,6 +20,7 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 	proposals = append(proposals, suggestLargeFunctions(idx)...)
 	proposals = append(proposals, suggestLargeParameterLists(idx)...)
 	proposals = append(proposals, suggestBooleanFlags(idx)...)
+	proposals = append(proposals, suggestHighPressureSymbols(idx)...)
 	proposals = append(proposals, suggestHighFanIn(idx)...)
 	for i := range proposals {
 		proposals[i].ID = fmt.Sprintf("prop_%03d", i+1)
@@ -29,7 +31,7 @@ func (b GoBackend) Suggest(ctx context.Context, snapshot Snapshot, scope Scope) 
 func suggestUnusedPrivate(idx *index) []Proposal {
 	used := map[SymbolID]bool{}
 	for _, occ := range idx.occurrences {
-		if occ.Kind == OccurrenceDeclaration {
+		if occ.Kind != OccurrenceReference {
 			continue
 		}
 		used[occ.SymbolID] = true
@@ -39,7 +41,7 @@ func suggestUnusedPrivate(idx *index) []Proposal {
 		if sym.Kind == SymbolField || sym.Kind == SymbolMethod || sym.Kind == SymbolPackage || isExported(sym.Name) || used[sym.ID] {
 			continue
 		}
-		if strings.HasPrefix(sym.Name, "_") {
+		if strings.HasPrefix(sym.Name, "_") || isGoEntrypoint(sym) {
 			continue
 		}
 		out = append(out, Proposal{
@@ -55,6 +57,16 @@ func suggestUnusedPrivate(idx *index) []Proposal {
 		})
 	}
 	return out
+}
+
+func isGoEntrypoint(sym Symbol) bool {
+	if sym.Kind != SymbolFunction {
+		return false
+	}
+	if sym.Name == "init" {
+		return true
+	}
+	return sym.Name == "main" && (sym.UnitID == "main" || strings.HasSuffix(sym.UnitID, "#main"))
 }
 
 func suggestLargeFunctions(idx *index) []Proposal {
@@ -148,6 +160,119 @@ func suggestHighFanIn(idx *index) []Proposal {
 		})
 	}
 	return out
+}
+
+func suggestHighPressureSymbols(idx *index) []Proposal {
+	metrics := computeSymbolMetrics(idx)
+	var out []Proposal
+	for _, metric := range metrics {
+		if metric.ReferenceCount < 5 && metric.CallFanIn < 5 {
+			continue
+		}
+		sym := idx.byID[metric.SymbolID]
+		if sym.ID == "" || sym.Kind == SymbolField || sym.Kind == SymbolPackage {
+			continue
+		}
+		out = append(out, Proposal{
+			Kind:       RefactorSplitFunction,
+			Title:      "Review high-pressure symbol",
+			Summary:    fmt.Sprintf("%q has high inbound source pressure.", metric.QualifiedName),
+			Confidence: LowConfidence,
+			Risk:       RiskMedium,
+			Targets:    []Symbol{sym},
+			Evidence:   metric.Evidence,
+			Metrics: map[string]float64{
+				"references":  float64(metric.ReferenceCount),
+				"call_fan_in": float64(metric.CallFanIn),
+				"score":       metric.PressureScore,
+			},
+		})
+	}
+	return out
+}
+
+func computeSymbolMetrics(idx *index) []SymbolMetrics {
+	metrics := map[SymbolID]*SymbolMetrics{}
+	for _, sym := range idx.symbols {
+		if sym.ID == "" {
+			continue
+		}
+		metrics[sym.ID] = &SymbolMetrics{
+			SymbolID:      sym.ID,
+			UnitID:        sym.UnitID,
+			Kind:          sym.Kind,
+			Name:          sym.Name,
+			QualifiedName: sym.QualifiedName,
+			Location:      sym.Location,
+		}
+	}
+	for _, occ := range idx.occurrences {
+		if occ.Kind == OccurrenceDeclaration {
+			continue
+		}
+		m := ensureSymbolMetric(metrics, idx, occ.SymbolID)
+		if m == nil {
+			continue
+		}
+		m.ReferenceCount++
+	}
+	for _, edge := range idx.edges {
+		switch edge.Kind {
+		case EdgeCalls:
+			if m := ensureSymbolMetric(metrics, idx, SymbolID(edge.From)); m != nil {
+				m.CallFanOut++
+			}
+			if m := ensureSymbolMetric(metrics, idx, SymbolID(edge.To)); m != nil {
+				m.CallFanIn++
+			}
+		case EdgeImplements:
+			if m := ensureSymbolMetric(metrics, idx, SymbolID(edge.From)); m != nil {
+				m.ImplementationCount++
+			}
+		}
+	}
+	var out []SymbolMetrics
+	for _, m := range metrics {
+		m.PressureScore = float64(m.ReferenceCount + 2*m.CallFanIn + m.CallFanOut + m.ImplementationCount)
+		if m.PressureScore > 0 {
+			m.Evidence = []Evidence{{Kind: "symbol_pressure_score", Message: "score is based on references, call fan-in/out, and implementation edges"}}
+		}
+		out = append(out, *m)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.PressureScore != b.PressureScore {
+			return a.PressureScore > b.PressureScore
+		}
+		if a.Location.URI != b.Location.URI {
+			return a.Location.URI < b.Location.URI
+		}
+		return a.Location.Range.Start.Offset < b.Location.Range.Start.Offset
+	})
+	return out
+}
+
+func ensureSymbolMetric(metrics map[SymbolID]*SymbolMetrics, idx *index, id SymbolID) *SymbolMetrics {
+	if id == "" {
+		return nil
+	}
+	if m, ok := metrics[id]; ok {
+		return m
+	}
+	sym, ok := idx.byID[id]
+	if !ok {
+		return nil
+	}
+	m := &SymbolMetrics{
+		SymbolID:      sym.ID,
+		UnitID:        sym.UnitID,
+		Kind:          sym.Kind,
+		Name:          sym.Name,
+		QualifiedName: sym.QualifiedName,
+		Location:      sym.Location,
+	}
+	metrics[id] = m
+	return m
 }
 
 func countParams(signature string) int {

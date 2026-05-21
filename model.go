@@ -40,6 +40,7 @@ type (
 	CallEdge          = core.CallEdge
 	Implementation    = core.Implementation
 	UnitMetrics       = core.UnitMetrics
+	SymbolMetrics     = core.SymbolMetrics
 	Metrics           = core.Metrics
 	ChangedFile       = core.ChangedFile
 )

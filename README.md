@@ -39,6 +39,10 @@ The core API is language-agnostic: callers work with symbols, ranges, occurrence
   - boolean flag parameters
   - high fan-in packages
 
+## Position coordinates
+
+`Position` and `PositionSelector` use 1-indexed line and column coordinates. For Go source, columns are byte columns, matching `go/token.Position.Column`, not Unicode rune columns. This keeps line/column navigation consistent with stored Go ranges and offsets when UTF-8 text appears before a target on the same line. Offset-based selectors continue to use zero-indexed byte offsets.
+
 ## Example
 
 ```go

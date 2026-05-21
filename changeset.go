@@ -123,9 +123,10 @@ func (c *ChangeSet) applyFileEdits(ctx context.Context, fileEdits []FileEdit) er
 		}
 		if backend, ok := c.editor.backendForPath(p); ok {
 			formatted, err := backend.Format(ctx, p, next)
-			if err == nil {
-				next = formatted
+			if err != nil {
+				return fmt.Errorf("editor: format %s: %w", p, err)
 			}
+			next = formatted
 		}
 		c.overlay[p] = next
 		c.changed[p] = true
@@ -138,7 +139,10 @@ func applyTextEdits(src []byte, edits []TextEdit) ([]byte, error) {
 		return src, nil
 	}
 	edits = append([]TextEdit(nil), edits...)
-	sort.Slice(edits, func(i, j int) bool {
+	// Keep same-start edits in backend-provided order. This makes multiple
+	// zero-length inserts at one offset deterministic: their replacements are
+	// emitted in the same order they appeared in the input edit slice.
+	sort.SliceStable(edits, func(i, j int) bool {
 		return edits[i].Range.Start.Offset < edits[j].Range.Start.Offset
 	})
 	prevEnd := -1

@@ -87,16 +87,22 @@ func ImportsForPath(imports []ImportEdge, p string) []ImportEdge {
 	return out
 }
 
+// LineColumnOffset converts a 1-indexed line/column pair to a byte offset.
+//
+// Columns are byte columns, matching go/token.Position.Column. This is
+// intentional for Go ranges: non-ASCII UTF-8 characters before the target count
+// as multiple columns, so Position.Line/Column stays consistent with stored
+// token positions and Offset values.
 func LineColumnOffset(b []byte, line, column int) int {
 	if line <= 1 && column <= 1 {
 		return 0
 	}
 	curLine, curCol := 1, 1
-	for i, c := range b {
+	for i := 0; i < len(b); i++ {
 		if curLine == line && curCol == column {
 			return i
 		}
-		if c == '\n' {
+		if b[i] == '\n' {
 			curLine++
 			curCol = 1
 		} else {

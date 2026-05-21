@@ -27,11 +27,13 @@ type (
 	ImportResult      = core.ImportResult
 	PackageResult     = core.PackageResult
 	UnitMetrics       = core.UnitMetrics
+	SymbolMetrics     = core.SymbolMetrics
 	Operation         = core.Operation
 	OperationKind     = core.OperationKind
 	FileEdit          = core.FileEdit
 	TextEdit          = core.TextEdit
 	ReplaceFunction   = core.ReplaceFunction
+	RenameSymbol      = core.RenameSymbol
 	AppendFunction    = core.AppendFunction
 	DeleteSymbol      = core.DeleteSymbol
 	ReplaceComment    = core.ReplaceComment
@@ -71,6 +73,7 @@ const (
 	RefactorDeleteSymbol        = core.RefactorDeleteSymbol
 	RefactorExtractFunction     = core.RefactorExtractFunction
 	RefactorIntroduceConfig     = core.RefactorIntroduceConfig
+	RefactorSplitFunction       = core.RefactorSplitFunction
 	RefactorSplitPackage        = core.RefactorSplitPackage
 	RefactorReplaceFlagArgument = core.RefactorReplaceFlagArgument
 )
@@ -84,6 +87,7 @@ const (
 )
 
 const (
+	OpRenameSymbol    = core.OpRenameSymbol
 	OpReplaceFunction = core.OpReplaceFunction
 	OpAppendFunction  = core.OpAppendFunction
 	OpDeleteSymbol    = core.OpDeleteSymbol

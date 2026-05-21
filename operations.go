@@ -8,6 +8,7 @@ type (
 	TextEdit          = core.TextEdit
 	FileEdit          = core.FileEdit
 	ReplaceFunction   = core.ReplaceFunction
+	RenameSymbol      = core.RenameSymbol
 	AppendFunction    = core.AppendFunction
 	DeleteSymbol      = core.DeleteSymbol
 	ReplaceComment    = core.ReplaceComment

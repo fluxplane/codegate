@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/codewandler/editor/internal/core"
+	"github.com/codewandler/editor/internal/lang/goast"
 )
 
 func newTestEditor(t *testing.T, files map[string]string) *Editor {
@@ -204,6 +205,96 @@ type unused struct{}
 	}
 }
 
+func TestApplyTextEditsOrdersSameOffsetInInputOrder(t *testing.T) {
+	got, err := applyTextEdits([]byte("xy"), []TextEdit{
+		{
+			Range:       Range{Start: Position{Offset: 2}, End: Position{Offset: 2}},
+			Replacement: "C",
+		},
+		{
+			Range:       Range{Start: Position{Offset: 1}, End: Position{Offset: 1}},
+			Replacement: "A",
+		},
+		{
+			Range:       Range{Start: Position{Offset: 1}, End: Position{Offset: 1}},
+			Replacement: "B",
+		},
+		{
+			Range:       Range{Start: Position{Offset: 0}, End: Position{Offset: 0}},
+			Replacement: "^",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "^xAByC" {
+		t.Fatalf("same-offset inserts should keep input order, got %q", got)
+	}
+}
+
+func TestApplyTextEditsRejectsOverlappingEdits(t *testing.T) {
+	_, err := applyTextEdits([]byte("abcd"), []TextEdit{
+		{
+			Range:       Range{Start: Position{Offset: 0}, End: Position{Offset: 2}},
+			Replacement: "X",
+		},
+		{
+			Range:       Range{Start: Position{Offset: 1}, End: Position{Offset: 3}},
+			Replacement: "Y",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected overlapping edits to be rejected")
+	}
+	if !strings.Contains(err.Error(), "overlapping text edits") {
+		t.Fatalf("expected overlapping text edit error, got %v", err)
+	}
+}
+
+func TestChangeSetRejectsInvalidReplaceFunctionSource(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"user.go": `package user
+
+func CreateUser(name string) string {
+	return name
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+
+	err := changes.Apply(ctx, ReplaceFunction{
+		Target: SymbolSelector{Name: "CreateUser", Kind: SymbolFunction},
+		Source: `func CreateUser(name string) string {
+	return
+`,
+	})
+	if err == nil {
+		t.Fatal("expected invalid replacement source to fail formatting")
+	}
+	if !strings.Contains(err.Error(), "format user.go") {
+		t.Fatalf("expected format error with path, got %v", err)
+	}
+	files, filesErr := changes.Files(ctx)
+	if filesErr != nil {
+		t.Fatal(filesErr)
+	}
+	if len(files) != 0 {
+		t.Fatalf("invalid edit should not mark files changed: %#v", files)
+	}
+}
+
+func TestGoBackendFormatReturnsInvalidGoErrors(t *testing.T) {
+	ctx := context.Background()
+	formatted, err := goast.New().Format(ctx, "bad.go", []byte("package bad\nfunc Broken("))
+	if err == nil {
+		t.Fatal("expected Go formatter to reject invalid source")
+	}
+	if formatted != nil {
+		t.Fatalf("expected no formatted source on error, got %q", formatted)
+	}
+}
+
 func TestRemoveStructTag(t *testing.T) {
 	ctx := context.Background()
 	ed := newTestEditor(t, map[string]string{
@@ -261,6 +352,399 @@ func unusedHelper() {}
 	}
 }
 
+func TestSuggestRefactoringsSkipsGoEntrypoints(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"main.go": `package main
+
+func init() {}
+
+func main() {}
+`,
+		"cmd/app/main.go": `package main
+
+func init() {}
+
+func main() {}
+
+func unusedHelper() {}
+`,
+	})
+	proposals, err := ed.SuggestRefactorings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := map[string]bool{}
+	for _, proposal := range proposals {
+		if proposal.Kind != RefactorDeleteSymbol {
+			continue
+		}
+		for _, target := range proposal.Targets {
+			deleted[target.Name] = true
+		}
+	}
+	if deleted["main"] || deleted["init"] {
+		t.Fatalf("entrypoints should not be delete suggestions: %#v", proposals)
+	}
+	if !deleted["unusedHelper"] {
+		t.Fatalf("expected unused helper delete suggestion: %#v", proposals)
+	}
+}
+
+func TestRenameSymbolRenamesFunctionAndCalls(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"a.go": `package demo
+
+func Target() {}
+
+func Caller() {
+	Target()
+}
+`,
+		"b.go": `package demo
+
+func Other() {
+	Target()
+}
+`,
+	})
+	fragment, err := ed.ReadSymbol(ctx, SymbolSelector{Name: "Target", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameSymbol{
+		Target:       SymbolSelector{ID: fragment.Symbol.ID},
+		NewName:      "Renamed",
+		ExpectedHash: fragment.Hash,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := changedFilesByPath(files)
+	if !strings.Contains(string(got["a.go"].After), "func Renamed()") || !strings.Contains(string(got["a.go"].After), "Renamed()") {
+		t.Fatalf("a.go was not renamed correctly:\n%s", got["a.go"].After)
+	}
+	if !strings.Contains(string(got["b.go"].After), "Renamed()") {
+		t.Fatalf("b.go was not renamed correctly:\n%s", got["b.go"].After)
+	}
+}
+
+func TestRenameSymbolRenamesMethodAndDirectSelectorCalls(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"store.go": `package demo
+
+type Store struct{}
+
+func (s *Store) Load() {}
+
+func Caller(s *Store) {
+	s.Load()
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameSymbol{
+		Target:  SymbolSelector{Name: "Load", Kind: SymbolMethod, Container: "Store"},
+		NewName: "Fetch",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := string(files[0].After)
+	if !strings.Contains(after, "func (s *Store) Fetch()") || !strings.Contains(after, "s.Fetch()") {
+		t.Fatalf("method was not renamed correctly:\n%s", after)
+	}
+}
+
+func TestRenameSymbolRenamesTypeUsages(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"types.go": `package demo
+
+type Thing struct{}
+
+func NewThing() Thing {
+	return Thing{}
+}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameSymbol{
+		Target:  SymbolSelector{Name: "Thing", Kind: SymbolStruct},
+		NewName: "Widget",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := string(files[0].After)
+	if !strings.Contains(after, "type Widget struct{}") || !strings.Contains(after, "func NewThing() Widget") || !strings.Contains(after, "return Widget{}") {
+		t.Fatalf("type usages were not renamed correctly:\n%s", after)
+	}
+}
+
+func TestRenameSymbolRejectsInvalidAndUnsupportedTargets(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"user.go": `package demo
+
+type User struct {
+	Email string
+}
+
+func Target() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, RenameSymbol{Target: SymbolSelector{Name: "Target", Kind: SymbolFunction}, NewName: "1bad"}); err == nil {
+		t.Fatal("expected invalid identifier to be rejected")
+	}
+	if err := changes.Apply(ctx, RenameSymbol{Target: SymbolSelector{Name: "Email", Kind: SymbolField}, NewName: "Address"}); err == nil {
+		t.Fatal("expected field rename to be rejected")
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("rejected rename should not change files: %#v", files)
+	}
+}
+
+func TestRenameSymbolRejectsAmbiguousSelector(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"a/a.go": `package a
+
+func Target() {}
+`,
+		"b/b.go": `package b
+
+func Target() {}
+`,
+	})
+	changes := ed.NewChangeSet()
+	err := changes.Apply(ctx, RenameSymbol{
+		Target:  SymbolSelector{Name: "Target", Kind: SymbolFunction},
+		NewName: "Renamed",
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous rename to fail")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got %v", err)
+	}
+}
+
+func TestExpectedHashGuardsSemanticEdits(t *testing.T) {
+	ctx := context.Background()
+	for name, apply := range map[string]func(*ChangeSet) error{
+		"replace": func(changes *ChangeSet) error {
+			return changes.Apply(ctx, ReplaceFunction{
+				Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+				Source:       "func Target() string { return \"new\" }",
+				ExpectedHash: "stale",
+			})
+		},
+		"delete": func(changes *ChangeSet) error {
+			return changes.Apply(ctx, DeleteSymbol{
+				Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+				ExpectedHash: "stale",
+			})
+		},
+		"comment": func(changes *ChangeSet) error {
+			return changes.Apply(ctx, ReplaceComment{
+				Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+				Text:         "Target is updated.",
+				ExpectedHash: "stale",
+			})
+		},
+		"rename": func(changes *ChangeSet) error {
+			return changes.Apply(ctx, RenameSymbol{
+				Target:       SymbolSelector{Name: "Target", Kind: SymbolFunction},
+				NewName:      "Renamed",
+				ExpectedHash: "stale",
+			})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ed := newTestEditor(t, map[string]string{
+				"target.go": `package demo
+
+func Target() string {
+	return "old"
+}
+`,
+			})
+			changes := ed.NewChangeSet()
+			err := apply(changes)
+			if err == nil {
+				t.Fatal("expected stale hash error")
+			}
+			if !strings.Contains(err.Error(), "stale source") {
+				t.Fatalf("expected stale source error, got %v", err)
+			}
+			files, filesErr := changes.Files(ctx)
+			if filesErr != nil {
+				t.Fatal(filesErr)
+			}
+			if len(files) != 0 {
+				t.Fatalf("stale edit should not change files: %#v", files)
+			}
+		})
+	}
+}
+
+func TestExpectedHashAllowsMatchingReplaceFunction(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"target.go": `package demo
+
+func Target() string {
+	return "old"
+}
+`,
+	})
+	fragment, err := ed.ReadSymbol(ctx, SymbolSelector{Name: "Target", Kind: SymbolFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx, ReplaceFunction{
+		Target:       SymbolSelector{ID: fragment.Symbol.ID},
+		Source:       "func Target() string { return \"new\" }",
+		ExpectedHash: fragment.Hash,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || !strings.Contains(string(files[0].After), `return "new"`) {
+		t.Fatalf("matching hash should allow replacement: %#v", files)
+	}
+}
+
+func TestDeleteSymbolDeletesOnlySelectedGroupedSpec(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"values.go": `package demo
+
+const (
+	Keep = 1
+	Drop = 2
+	AlsoKeep = 3
+)
+
+type (
+	KeepType struct{}
+	DropType struct{}
+)
+`,
+	})
+	changes := ed.NewChangeSet()
+	if err := changes.Apply(ctx,
+		DeleteSymbol{Target: SymbolSelector{Name: "Drop", Kind: SymbolConst}},
+		DeleteSymbol{Target: SymbolSelector{Name: "DropType", Kind: SymbolStruct}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	files, err := changes.Files(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := string(files[0].After)
+	for _, want := range []string{"Keep", "AlsoKeep = 3", "KeepType struct{}"} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("expected %q to remain:\n%s", want, after)
+		}
+	}
+	for _, gone := range []string{"Drop = 2", "DropType struct{}"} {
+		if strings.Contains(after, gone) {
+			t.Fatalf("expected %q to be deleted:\n%s", gone, after)
+		}
+	}
+}
+
+func TestMetricsIncludeSymbolPressure(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"hot.go": `package demo
+
+func Hot() {}
+
+func A() { Hot() }
+func B() { Hot() }
+func C() { Hot() }
+func D() { Hot() }
+func E() { Hot() }
+`,
+	})
+	metrics, err := ed.Metrics(ctx, Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hot *SymbolMetrics
+	for i := range metrics.Symbols {
+		if metrics.Symbols[i].QualifiedName == "Hot" {
+			hot = &metrics.Symbols[i]
+			break
+		}
+	}
+	if hot == nil {
+		t.Fatalf("Hot symbol metrics not found: %#v", metrics.Symbols)
+	}
+	if hot.ReferenceCount < 5 || hot.CallFanIn < 5 || hot.PressureScore <= 0 {
+		t.Fatalf("unexpected Hot metrics: %#v", *hot)
+	}
+}
+
+func TestSuggestRefactoringsIncludesHighPressureSymbols(t *testing.T) {
+	ctx := context.Background()
+	ed := newTestEditor(t, map[string]string{
+		"hot.go": `package demo
+
+func Hot() {}
+
+func A() { Hot() }
+func B() { Hot() }
+func C() { Hot() }
+func D() { Hot() }
+func E() { Hot() }
+`,
+	})
+	proposals, err := ed.SuggestRefactorings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, proposal := range proposals {
+		if proposal.Kind != RefactorSplitFunction {
+			continue
+		}
+		for _, target := range proposal.Targets {
+			if target.QualifiedName == "Hot" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected high-pressure symbol proposal for Hot: %#v", proposals)
+	}
+}
+
 func TestGoParserParityAPIs(t *testing.T) {
 	ctx := context.Background()
 	files := map[string]string{
@@ -284,8 +768,10 @@ func Run() {
 `,
 		"store/b.go": `package store
 
+import "strings"
+
 func CreateUser(name string) string {
-	return name
+	return strings.TrimSpace(name)
 }
 `,
 		"consumer/use.go": `package consumer
@@ -305,6 +791,16 @@ func Use() {
 	}
 	if len(packages.Packages) != 2 {
 		t.Fatalf("expected two Go packages, got %#v", packages.Packages)
+	}
+	var storePackageID string
+	for _, pkg := range packages.Packages {
+		if pkg.Dir == "store" {
+			storePackageID = pkg.ID
+			break
+		}
+	}
+	if storePackageID == "" {
+		t.Fatalf("store package not found: %#v", packages.Packages)
 	}
 
 	callOffset := offsetOf(t, files["store/a.go"], `CreateUser("x")`)
@@ -340,6 +836,18 @@ func Use() {
 		t.Fatalf("unexpected direct imports: %#v", direct.DirectImports)
 	}
 
+	packageDirect, err := ed.ImportGraph(ctx, ImportQuery{PackageID: storePackageID, Direction: ImportDirectionDirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotImports := map[string]bool{}
+	for _, imp := range packageDirect.DirectImports {
+		gotImports[imp.Import] = true
+	}
+	if len(packageDirect.DirectImports) != 2 || !gotImports["example.com/demo/lib"] || !gotImports["strings"] {
+		t.Fatalf("unexpected PackageID direct imports: %#v", packageDirect.DirectImports)
+	}
+
 	reverse, err := ed.ImportGraph(ctx, ImportQuery{ImportPath: "example.com/demo/store", Direction: ImportDirectionReverse})
 	if err != nil {
 		t.Fatal(err)
@@ -358,6 +866,269 @@ func Use() {
 	}
 }
 
+func TestGoBackendScopeUnitIDAndMaxFiles(t *testing.T) {
+	ctx := context.Background()
+	files := map[string]string{
+		"a/a.go": `package a
+
+import "example.com/demo/shared"
+
+func A() {}
+`,
+		"b/b.go": `package b
+
+import "strings"
+
+func B() {}
+`,
+		"c/c.go": `package c
+
+func C() {}
+`,
+	}
+	ed := newTestEditor(t, files)
+
+	unitOutline, err := ed.Outline(ctx, Scope{UnitID: "b#b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unitOutline.Documents) != 1 || unitOutline.Documents[0].URI != "b/b.go" {
+		t.Fatalf("UnitID scope included unexpected documents: %#v", unitOutline.Documents)
+	}
+	if len(unitOutline.Symbols) != 1 || unitOutline.Symbols[0].Name != "B" || unitOutline.Symbols[0].UnitID != "b#b" {
+		t.Fatalf("UnitID scope included unexpected symbols: %#v", unitOutline.Symbols)
+	}
+
+	limitedOutline, err := ed.Outline(ctx, Scope{MaxFiles: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limitedOutline.Documents) != 1 || limitedOutline.Documents[0].URI != "a/a.go" {
+		t.Fatalf("MaxFiles scope should limit documents to first sorted file: %#v", limitedOutline.Documents)
+	}
+	if len(limitedOutline.Symbols) != 1 || limitedOutline.Symbols[0].Location.URI != "a/a.go" {
+		t.Fatalf("MaxFiles scope should limit symbols to first sorted file: %#v", limitedOutline.Symbols)
+	}
+
+	limitedPackages, err := ed.Packages(ctx, Scope{MaxFiles: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limitedPackages.Packages) != 1 || limitedPackages.Packages[0].ID != "a#a" {
+		t.Fatalf("MaxFiles scope should limit packages to first sorted file: %#v", limitedPackages.Packages)
+	}
+
+	limitedMetrics, err := ed.Metrics(ctx, Scope{MaxFiles: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limitedMetrics.Units) != 1 || limitedMetrics.Units[0].UnitID != "a#a" {
+		t.Fatalf("MaxFiles scope should limit metrics to first sorted file: %#v", limitedMetrics.Units)
+	}
+
+	limitedImports, err := ed.Imports(ctx, Scope{MaxFiles: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limitedImports) != 1 || limitedImports[0].FromPath != "a/a.go" || limitedImports[0].Import != "example.com/demo/shared" {
+		t.Fatalf("MaxFiles scope should limit imports to first sorted file: %#v", limitedImports)
+	}
+}
+
+func TestNavigateLineColumnUsesByteColumnsWithUTF8(t *testing.T) {
+	ctx := context.Background()
+	src := `package utf8
+
+func Caller() {
+	println("éé"); Target()
+}
+
+func Target() {}
+`
+	ed := newTestEditor(t, map[string]string{"utf8.go": src})
+
+	lineText := strings.Split(src, "\n")[3]
+	byteColumn := strings.Index(lineText, "Target") + 1
+	if byteColumn == 0 {
+		t.Fatal("Target call not found on UTF-8 line")
+	}
+	runeColumn := len([]rune(lineText[:byteColumn-1])) + 1
+	if byteColumn <= runeColumn {
+		t.Fatalf("test line does not exercise UTF-8 byte-column skew: byte=%d rune=%d", byteColumn, runeColumn)
+	}
+
+	nav, err := ed.Navigate(ctx, PositionSelector{Path: "utf8.go", Line: 4, Column: byteColumn}, NavigationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nav.Symbols) != 1 || nav.Symbols[0].Name != "Target" {
+		t.Fatalf("unexpected line/column navigation result: %#v", nav)
+	}
+
+	callOffset := offsetOf(t, src, "Target()")
+	offsetNav, err := ed.Navigate(ctx, PositionSelector{Path: "utf8.go", Offset: &callOffset}, NavigationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offsetNav.Symbols) != 1 || offsetNav.Symbols[0].Name != "Target" {
+		t.Fatalf("unexpected offset navigation result: %#v", offsetNav)
+	}
+	if nav.Target.Location.Range.Start.Offset != callOffset || offsetNav.Target.Location.Range.Start.Offset != callOffset {
+		t.Fatalf("line/column and offset navigation resolved different starts: line/column=%d offset=%d want=%d", nav.Target.Location.Range.Start.Offset, offsetNav.Target.Location.Range.Start.Offset, callOffset)
+	}
+}
+
+func TestReferencesAtRespectsPathScopeAndLimits(t *testing.T) {
+	ctx := context.Background()
+	files := map[string]string{
+		"pkg/a.go": `package pkg
+
+func Target() {}
+
+func InScope() {
+	Target()
+	Target()
+}
+`,
+		"pkg/b.go": `package pkg
+
+func OutOfScope() {
+	Target()
+}
+`,
+		"pkg/a_test.go": `package pkg
+
+func TestTarget() {
+	Target()
+}
+`,
+	}
+	ed := newTestEditor(t, files)
+	callOffset := offsetOf(t, files["pkg/a.go"], "Target()\n\tTarget")
+
+	refs, err := ed.ReferencesAt(ctx, PositionSelector{Path: "pkg/a.go", Offset: &callOffset}, ReferenceOptions{
+		Scope:              Scope{Path: "pkg/a.go"},
+		IncludeDeclaration: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) == 0 {
+		t.Fatal("expected scoped references")
+	}
+	for _, ref := range refs {
+		if ref.Location.URI != "pkg/a.go" {
+			t.Fatalf("out-of-scope reference returned: %#v", refs)
+		}
+		if ref.Kind == OccurrenceDeclaration {
+			t.Fatalf("declaration should have been excluded: %#v", refs)
+		}
+	}
+
+	withDecl, err := ed.ReferencesAt(ctx, PositionSelector{Path: "pkg/a.go", Offset: &callOffset}, ReferenceOptions{
+		Scope:              Scope{Path: "pkg/a.go"},
+		IncludeDeclaration: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDecl := false
+	for _, ref := range withDecl {
+		if ref.Kind == OccurrenceDeclaration {
+			foundDecl = true
+		}
+		if ref.Location.URI != "pkg/a.go" {
+			t.Fatalf("out-of-scope reference returned with declaration: %#v", withDecl)
+		}
+	}
+	if !foundDecl {
+		t.Fatalf("expected declaration when IncludeDeclaration is true: %#v", withDecl)
+	}
+
+	limited, err := ed.ReferencesAt(ctx, PositionSelector{Path: "pkg/a.go", Offset: &callOffset}, ReferenceOptions{
+		Scope:              Scope{Path: "pkg/a.go"},
+		IncludeDeclaration: false,
+		MaxResults:         1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("expected MaxResults to limit references to 1, got %#v", limited)
+	}
+
+	withoutTests, err := ed.ReferencesAt(ctx, PositionSelector{Path: "pkg/a.go", Offset: &callOffset}, ReferenceOptions{
+		Scope:              Scope{Path: "pkg"},
+		IncludeDeclaration: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range withoutTests {
+		if strings.HasSuffix(ref.Location.URI, "_test.go") {
+			t.Fatalf("test reference returned when IncludeTests is false: %#v", withoutTests)
+		}
+	}
+
+	withTests, err := ed.ReferencesAt(ctx, PositionSelector{Path: "pkg/a.go", Offset: &callOffset}, ReferenceOptions{
+		Scope:              Scope{Path: "pkg", IncludeTests: true},
+		IncludeDeclaration: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundTestRef := false
+	for _, ref := range withTests {
+		if strings.HasSuffix(ref.Location.URI, "_test.go") {
+			foundTestRef = true
+		}
+	}
+	if !foundTestRef {
+		t.Fatalf("expected test reference when IncludeTests is true: %#v", withTests)
+	}
+}
+
+func TestReferencesAtRespectsUnitIDScope(t *testing.T) {
+	ctx := context.Background()
+	lang := LanguageID("ref")
+	ed := newTestEditorWithOptions(t, map[string]string{
+		"in.ref":  "Demo local\n",
+		"out.ref": "remote\n",
+	}, WithBackend(referenceBackend{}), WithLanguage(lang))
+	offset := 0
+
+	refs, err := ed.ReferencesAt(ctx, PositionSelector{Path: "in.ref", Offset: &offset}, ReferenceOptions{
+		Scope:              Scope{UnitID: "unit/in", Language: lang},
+		IncludeDeclaration: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) == 0 {
+		t.Fatal("expected unit-scoped references")
+	}
+	for _, ref := range refs {
+		if ref.Location.URI != "in.ref" {
+			t.Fatalf("out-of-unit reference returned: %#v", refs)
+		}
+		if ref.Kind == OccurrenceDeclaration {
+			t.Fatalf("declaration should have been excluded: %#v", refs)
+		}
+	}
+
+	limited, err := ed.ReferencesAt(ctx, PositionSelector{Path: "in.ref", Offset: &offset}, ReferenceOptions{
+		Scope:              Scope{UnitID: "unit/in", Language: lang},
+		IncludeDeclaration: true,
+		MaxResults:         1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("expected MaxResults to limit unit-scoped references to 1, got %#v", limited)
+	}
+}
+
 func offsetOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	offset := strings.Index(src, needle)
@@ -365,6 +1136,14 @@ func offsetOf(t *testing.T, src, needle string) int {
 		t.Fatalf("needle %q not found", needle)
 	}
 	return offset
+}
+
+func changedFilesByPath(files []ChangedFile) map[string]ChangedFile {
+	out := map[string]ChangedFile{}
+	for _, file := range files {
+		out[file.Path] = file
+	}
+	return out
 }
 
 func TestGoParserPackagesOnlyLiveInGoBackend(t *testing.T) {
@@ -387,7 +1166,7 @@ func TestGoParserPackagesOnlyLiveInGoBackend(t *testing.T) {
 
 func TestCoreDoesNotUseHostOSOrProcessExecution(t *testing.T) {
 	for _, file := range productionGoFiles(t) {
-		if strings.HasPrefix(file, "adapter/") || strings.HasPrefix(file, "internal/lang/") {
+		if strings.HasPrefix(file, "adapter/") || strings.HasPrefix(file, "cmd/") || strings.HasPrefix(file, "internal/lang/") {
 			continue
 		}
 		src, err := os.ReadFile(file)
@@ -411,7 +1190,7 @@ func productionGoFiles(t *testing.T) []string {
 		}
 		if d.IsDir() {
 			switch p {
-			case ".git", ".agents":
+			case ".git", ".agents", "vendor":
 				return filepath.SkipDir
 			default:
 				return nil
@@ -591,5 +1370,95 @@ func (fakeBackend) Format(_ context.Context, _ string, src []byte) ([]byte, erro
 }
 
 func (fakeBackend) Suggest(context.Context, core.Snapshot, Scope) ([]Proposal, error) {
+	return nil, nil
+}
+
+type referenceBackend struct{}
+
+func (referenceBackend) Spec() BackendSpec {
+	return BackendSpec{
+		Language:       LanguageID("ref"),
+		Name:           "ref",
+		FileExtensions: []string{".ref"},
+		Capabilities:   []string{"index"},
+		ResolutionMode: "ref",
+	}
+}
+
+func (referenceBackend) Index(ctx context.Context, snapshot core.Snapshot, scope Scope) (*core.Index, error) {
+	idx := core.NewIndex()
+	files, err := snapshot.ListFiles(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if filepath.Ext(file) != ".ref" {
+			continue
+		}
+		src, err := snapshot.ReadFile(ctx, file)
+		if err != nil {
+			return nil, err
+		}
+		unit := "unit/out"
+		if file == "in.ref" {
+			unit = "unit/in"
+		}
+		idx.Documents = append(idx.Documents, Document{URI: file, Language: LanguageID("ref"), UnitID: unit})
+		idx.FileUnits[file] = unit
+		idx.UnitFiles[unit] = append(idx.UnitFiles[unit], file)
+		if file == "in.ref" {
+			sym := Symbol{
+				ID:             SymbolID("ref:Demo"),
+				Language:       LanguageID("ref"),
+				Kind:           SymbolClass,
+				Name:           "Demo",
+				QualifiedName:  "Demo",
+				UnitID:         unit,
+				Location:       Location{URI: file, Range: Range{Start: Position{Offset: 0}, End: Position{Offset: len(src)}}},
+				SelectionRange: Range{Start: Position{Offset: 0}, End: Position{Offset: len("Demo")}},
+				Backend:        BackendInfo{Language: LanguageID("ref"), Name: "ref", ResolutionMode: "ref", Complete: true},
+			}
+			idx.Symbols = append(idx.Symbols, sym)
+			idx.ByID[sym.ID] = sym
+			idx.ByName[sym.Name] = append(idx.ByName[sym.Name], sym)
+			idx.Occurrences = append(idx.Occurrences, Occurrence{
+				SymbolID: sym.ID,
+				Kind:     OccurrenceDeclaration,
+				Name:     sym.Name,
+				Location: Location{URI: file, Range: sym.SelectionRange},
+			})
+			localOffset := strings.Index(string(src), "local")
+			if localOffset >= 0 {
+				idx.Occurrences = append(idx.Occurrences, Occurrence{
+					SymbolID: sym.ID,
+					Kind:     OccurrenceReference,
+					Name:     sym.Name,
+					Location: Location{URI: file, Range: Range{Start: Position{Offset: localOffset}, End: Position{Offset: localOffset + len("local")}}},
+				})
+			}
+		}
+		if file == "out.ref" {
+			idx.Occurrences = append(idx.Occurrences, Occurrence{
+				SymbolID: SymbolID("ref:Demo"),
+				Kind:     OccurrenceReference,
+				Name:     "Demo",
+				Location: Location{URI: file, Range: Range{Start: Position{Offset: 0}, End: Position{Offset: len(src)}}},
+			})
+		}
+	}
+	core.SortSymbols(idx.Symbols)
+	core.SortOccurrences(idx.Occurrences)
+	return idx, nil
+}
+
+func (referenceBackend) CompileEdit(context.Context, core.Snapshot, Operation) ([]FileEdit, error) {
+	return nil, errors.New("reference backend does not support edits")
+}
+
+func (referenceBackend) Format(_ context.Context, _ string, src []byte) ([]byte, error) {
+	return src, nil
+}
+
+func (referenceBackend) Suggest(context.Context, core.Snapshot, Scope) ([]Proposal, error) {
 	return nil, nil
 }

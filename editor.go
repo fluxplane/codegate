@@ -220,23 +220,46 @@ func (e *Editor) ReferencesAt(ctx context.Context, pos PositionSelector, opts Re
 	if len(nav.Symbols) == 0 {
 		return nil, nil
 	}
-	refs, err := e.References(ctx, SymbolSelector{ID: nav.Symbols[0].ID, Language: nav.Symbols[0].Language})
+
+	referenceScope := opts.Scope
+	if referenceScope.Language == "" {
+		referenceScope.Language = nav.Symbols[0].Language
+	}
+	idx, err := e.buildIndex(ctx, referenceScope, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !opts.IncludeDeclaration {
-		filtered := refs[:0]
-		for _, ref := range refs {
-			if ref.Kind != OccurrenceDeclaration {
-				filtered = append(filtered, ref)
-			}
+	targetID := nav.Symbols[0].ID
+	refs := make([]Occurrence, 0)
+	for _, occ := range idx.Occurrences {
+		if occ.SymbolID != targetID || !referenceInScope(idx, occ, opts.Scope) {
+			continue
 		}
-		refs = filtered
-	}
-	if opts.MaxResults > 0 && len(refs) > opts.MaxResults {
-		refs = refs[:opts.MaxResults]
+		if !opts.IncludeDeclaration && occ.Kind == OccurrenceDeclaration {
+			continue
+		}
+		refs = append(refs, occ)
+		if opts.MaxResults > 0 && len(refs) >= opts.MaxResults {
+			break
+		}
 	}
 	return refs, nil
+}
+
+func referenceInScope(idx *core.Index, occ Occurrence, scope Scope) bool {
+	uri := core.CleanPath(occ.Location.URI)
+	if scope.Path != "" && !inScopePath(uri, scope.Path) {
+		return false
+	}
+	if scope.UnitID != "" {
+		if idx.FileUnits[uri] != scope.UnitID {
+			return false
+		}
+	}
+	if !scope.IncludeTests && core.HasTestPath(uri) {
+		return false
+	}
+	return true
 }
 
 func (e *Editor) Implementations(ctx context.Context, sel SymbolSelector) ([]Implementation, error) {
@@ -321,7 +344,10 @@ func (e *Editor) Imports(ctx context.Context, scope Scope) ([]ImportEdge, error)
 func (e *Editor) ImportGraph(ctx context.Context, query ImportQuery) (ImportResult, error) {
 	scope := query.Scope
 	if scope.Path == "" {
-		scope.Path = firstNonEmpty(query.Path, packagePath(query.PackageID))
+		scope.Path = query.Path
+		if scope.Path == "" && strings.Contains(query.PackageID, "#") {
+			scope.Path = packagePath(query.PackageID)
+		}
 	}
 	if query.IncludeTest != nil {
 		scope.IncludeTests = *query.IncludeTest
@@ -335,14 +361,16 @@ func (e *Editor) ImportGraph(ctx context.Context, query ImportQuery) (ImportResu
 		direction = ImportDirectionBoth
 	}
 	target := query.ImportPath
-	if target == "" && query.PackageID != "" {
-		target = packageDir(query.PackageID)
-	}
 	var direct, reverse []ImportEdge
 	for _, imp := range idx.Imports {
-		fromMatches := query.Path == "" || core.CleanPath(imp.FromPath) == core.CleanPath(query.Path) || strings.HasPrefix(core.CleanPath(imp.FromPath), core.CleanPath(query.Path)+"/")
+		fromMatches := true
+		if query.Path != "" {
+			queryPath := core.CleanPath(query.Path)
+			fromPath := core.CleanPath(imp.FromPath)
+			fromMatches = fromPath == queryPath || strings.HasPrefix(fromPath, queryPath+"/")
+		}
 		if query.PackageID != "" {
-			fromMatches = fromMatches || imp.FromUnit == query.PackageID
+			fromMatches = fromMatches && imp.FromUnit == query.PackageID
 		}
 		importMatches := target == "" || imp.Import == target || strings.HasSuffix(imp.Import, "/"+target) || strings.HasSuffix(imp.Import, target)
 		if (direction == ImportDirectionDirect || direction == ImportDirectionBoth) && fromMatches && importMatches {
@@ -392,7 +420,7 @@ func (e *Editor) Metrics(ctx context.Context, scope Scope) (Metrics, error) {
 	if err != nil {
 		return Metrics{}, err
 	}
-	return Metrics{Units: computeMetrics(idx), Diagnostics: idx.Diagnostics}, nil
+	return Metrics{Units: computeMetrics(idx), Symbols: computeSymbolMetrics(idx), Diagnostics: idx.Diagnostics}, nil
 }
 
 func (e *Editor) ReadSymbol(ctx context.Context, sel SymbolSelector) (SourceFragment, error) {
@@ -536,7 +564,7 @@ func (e *Editor) backendForPath(filePath string) (Backend, bool) {
 
 func (e *Editor) backendForOperation(op Operation) (Backend, error) {
 	switch op.Kind() {
-	case OpReplaceFunction, OpAppendFunction, OpDeleteSymbol, OpReplaceComment, OpEnsureStructTag, OpRemoveStructTag:
+	case OpRenameSymbol, OpReplaceFunction, OpAppendFunction, OpDeleteSymbol, OpReplaceComment, OpEnsureStructTag, OpRemoveStructTag:
 		if backend, ok := e.backends[Go]; ok {
 			return backend, nil
 		}

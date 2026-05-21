@@ -104,15 +104,20 @@ func buildIndex(ctx context.Context, snapshot Snapshot, scope Scope) (*index, er
 			continue
 		}
 		unit := unitID(p, af.Name.Name)
+		if scope.UnitID != "" && unit != scope.UnitID {
+			continue
+		}
 		pf := parsedFile{path: p, src: src, fset: fset, file: af, unit: unit}
 		parsed = append(parsed, pf)
-		idx.documents = append(idx.documents, Document{URI: p, Language: Go, UnitID: unit})
-		idx.unitFiles[unit] = append(idx.unitFiles[unit], p)
-		idx.fileUnits[p] = unit
-		idx.fileLOC[p] = countLines(src)
 	}
 	if scope.MaxFiles > 0 && len(parsed) > scope.MaxFiles {
 		parsed = parsed[:scope.MaxFiles]
+	}
+	for _, pf := range parsed {
+		idx.documents = append(idx.documents, Document{URI: pf.path, Language: Go, UnitID: pf.unit})
+		idx.unitFiles[pf.unit] = append(idx.unitFiles[pf.unit], pf.path)
+		idx.fileUnits[pf.path] = pf.unit
+		idx.fileLOC[pf.path] = countLines(pf.src)
 	}
 	for _, pf := range parsed {
 		indexDecls(idx, pf)
@@ -356,28 +361,33 @@ func indexUses(idx *index, pf parsedFile) {
 		}
 		caller := findCallable(idx, pf, fn)
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.CallExpr:
+			if x, ok := n.(*ast.CallExpr); ok {
 				if callee := callTarget(idx, pf.unit, x.Fun); callee.ID != "" && caller.ID != "" {
 					loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Fun.Pos(), x.Fun.End())}
 					idx.edges = append(idx.edges, Edge{Kind: EdgeCalls, From: string(caller.ID), To: string(callee.ID), Location: loc, Weight: 1})
 					idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: callee.ID, Kind: OccurrenceCall, Name: callee.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
 				}
-			case *ast.Ident:
-				if x.Obj != nil && x.Obj.Pos() == x.Pos() {
-					return true
-				}
-				for _, sym := range idx.byName[x.Name] {
-					if sym.UnitID == pf.unit && sym.SelectionRange.Start.Offset != pf.fset.Position(x.Pos()).Offset {
-						loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Pos(), x.End())}
-						idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: sym.ID, Kind: OccurrenceReference, Name: x.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
-						break
-					}
-				}
 			}
 			return true
 		})
 	}
+	ast.Inspect(pf.file, func(n ast.Node) bool {
+		x, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if x.Obj != nil && x.Obj.Pos() == x.Pos() {
+			return true
+		}
+		for _, sym := range idx.byName[x.Name] {
+			if sym.UnitID == pf.unit && sym.SelectionRange.Start.Offset != pf.fset.Position(x.Pos()).Offset {
+				loc := Location{URI: pf.path, Range: rangeOf(pf.fset, x.Pos(), x.End())}
+				idx.occurrences = append(idx.occurrences, Occurrence{SymbolID: sym.ID, Kind: OccurrenceReference, Name: x.Name, Location: loc, Preview: sourceLine(pf.src, loc.Range.Start.Offset)})
+				break
+			}
+		}
+		return true
+	})
 }
 
 func indexImplementations(idx *index) {

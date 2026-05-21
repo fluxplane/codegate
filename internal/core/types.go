@@ -273,9 +273,13 @@ const (
 )
 
 type ImportQuery struct {
-	Scope       Scope
-	Path        string
-	PackageID   string
+	// Scope constrains the files indexed before import filtering is applied.
+	Scope Scope
+	// Path selects the source file or directory for direct import queries.
+	Path string
+	// PackageID selects the source package/unit (ImportEdge.FromUnit) for direct import queries.
+	PackageID string
+	// ImportPath selects the target import path for direct and reverse import queries.
 	ImportPath  string
 	Direction   ImportDirection
 	MaxResults  int
@@ -358,8 +362,24 @@ type UnitMetrics struct {
 	Evidence            []Evidence
 }
 
+type SymbolMetrics struct {
+	SymbolID            SymbolID
+	UnitID              string
+	Kind                SymbolKind
+	Name                string
+	QualifiedName       string
+	Location            Location
+	ReferenceCount      int
+	CallFanIn           int
+	CallFanOut          int
+	ImplementationCount int
+	PressureScore       float64
+	Evidence            []Evidence
+}
+
 type Metrics struct {
 	Units       []UnitMetrics
+	Symbols     []SymbolMetrics
 	Diagnostics []Diagnostic
 }
 
@@ -403,11 +423,20 @@ type FileEdit struct {
 }
 
 type ReplaceFunction struct {
-	Target SymbolSelector
-	Source string
+	Target       SymbolSelector
+	Source       string
+	ExpectedHash string
 }
 
 func (ReplaceFunction) Kind() OperationKind { return OpReplaceFunction }
+
+type RenameSymbol struct {
+	Target       SymbolSelector
+	NewName      string
+	ExpectedHash string
+}
+
+func (RenameSymbol) Kind() OperationKind { return OpRenameSymbol }
 
 type AppendFunction struct {
 	Path   string
@@ -418,15 +447,17 @@ type AppendFunction struct {
 func (AppendFunction) Kind() OperationKind { return OpAppendFunction }
 
 type DeleteSymbol struct {
-	Target SymbolSelector
+	Target       SymbolSelector
+	ExpectedHash string
 }
 
 func (DeleteSymbol) Kind() OperationKind { return OpDeleteSymbol }
 
 type ReplaceComment struct {
-	Target SymbolSelector
-	Text   string
-	Style  string
+	Target       SymbolSelector
+	Text         string
+	Style        string
+	ExpectedHash string
 }
 
 func (ReplaceComment) Kind() OperationKind { return OpReplaceComment }

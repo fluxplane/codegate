@@ -26,3 +26,4 @@ tmp/
 # Agent/runtime local state
 .codex/
 .agents/index/
+.agents/runs

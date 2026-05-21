@@ -2,6 +2,8 @@ package goast
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -10,6 +12,7 @@ import (
 	"go/token"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/codewandler/editor/internal/core"
 )
@@ -21,6 +24,8 @@ type editCompiler struct {
 func (b GoBackend) CompileEdit(ctx context.Context, snapshot Snapshot, op Operation) ([]FileEdit, error) {
 	compiler := editCompiler{snapshot: snapshot}
 	switch x := op.(type) {
+	case RenameSymbol:
+		return compiler.compileRenameSymbol(ctx, x)
 	case ReplaceFunction:
 		return compiler.compileReplaceFunction(ctx, x)
 	case AppendFunction:
@@ -47,7 +52,7 @@ func (b GoBackend) Format(ctx context.Context, path string, src []byte) ([]byte,
 	}
 	formatted, err := format.Source(src)
 	if err != nil {
-		return src, nil
+		return nil, err
 	}
 	return formatted, nil
 }
@@ -70,6 +75,9 @@ func (c editCompiler) compileReplaceFunction(ctx context.Context, op ReplaceFunc
 		return nil, exactMatchErr("function", len(matches))
 	}
 	sym := matches[0]
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
 	return []FileEdit{{Path: sym.Location.URI, Edits: []TextEdit{{
 		Path:        sym.Location.URI,
 		Range:       sym.Location.Range,
@@ -116,11 +124,14 @@ func (c editCompiler) compileDeleteSymbol(ctx context.Context, op DeleteSymbol) 
 	if sym.Kind == SymbolField {
 		return nil, errors.New("editor: DeleteSymbol does not delete fields; use struct tag operations for field metadata")
 	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
 	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
 	}
-	r := expandLineRange(src, sym.Location.Range)
+	r := deleteRangeForSymbol(src, sym)
 	return []FileEdit{{Path: sym.Location.URI, Edits: []TextEdit{{Path: sym.Location.URI, Range: r, Replacement: ""}}}}, nil
 }
 
@@ -134,6 +145,9 @@ func (c editCompiler) compileReplaceComment(ctx context.Context, op ReplaceComme
 		return nil, exactMatchErr("symbol", len(matches))
 	}
 	sym := matches[0]
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
 	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
 	if err != nil {
 		return nil, err
@@ -152,6 +166,120 @@ func (c editCompiler) compileReplaceComment(ctx context.Context, op ReplaceComme
 	}
 	r := Range{Start: Position{Offset: start}, End: Position{Offset: end}}
 	return []FileEdit{{Path: sym.Location.URI, Edits: []TextEdit{{Path: sym.Location.URI, Range: r, Replacement: comment}}}}, nil
+}
+
+func (c editCompiler) compileRenameSymbol(ctx context.Context, op RenameSymbol) ([]FileEdit, error) {
+	if !isValidIdentifier(op.NewName) {
+		return nil, fmt.Errorf("editor: invalid Go identifier %q", op.NewName)
+	}
+	idx, err := buildIndex(ctx, c.snapshot, core.SelectorScope(op.Target))
+	if err != nil {
+		return nil, err
+	}
+	matches := core.FilterSymbols(idx.symbols, op.Target)
+	if len(matches) != 1 {
+		return nil, exactMatchErr("symbol", len(matches))
+	}
+	sym := matches[0]
+	if err := supportedRenameSymbol(sym); err != nil {
+		return nil, err
+	}
+	if sym.Name == op.NewName {
+		return nil, nil
+	}
+	if err := c.checkExpectedHash(ctx, sym, op.ExpectedHash); err != nil {
+		return nil, err
+	}
+	editsByPath := map[string][]TextEdit{}
+	seen := map[string]bool{}
+	add := func(loc Location) {
+		if loc.Range.Start.Offset < 0 || loc.Range.End.Offset < loc.Range.Start.Offset {
+			return
+		}
+		key := loc.URI + ":" + fmt.Sprint(loc.Range.Start.Offset) + ":" + fmt.Sprint(loc.Range.End.Offset)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		editsByPath[loc.URI] = append(editsByPath[loc.URI], TextEdit{Path: loc.URI, Range: loc.Range, Replacement: op.NewName})
+	}
+	add(Location{URI: sym.Location.URI, Range: sym.SelectionRange})
+	for _, occ := range idx.occurrences {
+		if occ.SymbolID == sym.ID {
+			if occ.Location.Range.End.Offset-occ.Location.Range.Start.Offset != len(sym.Name) {
+				continue
+			}
+			add(occ.Location)
+		}
+	}
+	if len(editsByPath) == 0 {
+		return nil, errors.New("editor: rename produced no edits")
+	}
+	paths := make([]string, 0, len(editsByPath))
+	for p := range editsByPath {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	out := make([]FileEdit, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, FileEdit{Path: p, Edits: editsByPath[p]})
+	}
+	return out, nil
+}
+
+func (c editCompiler) checkExpectedHash(ctx context.Context, sym Symbol, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	src, err := c.snapshot.ReadFile(ctx, sym.Location.URI)
+	if err != nil {
+		return err
+	}
+	start, end := sym.Location.Range.Start.Offset, sym.Location.Range.End.Offset
+	if start < 0 || end > len(src) || start > end {
+		return errors.New("editor: invalid symbol range")
+	}
+	actual := hashBytes(src[start:end])
+	if actual != expected {
+		return fmt.Errorf("editor: stale source for %s: expected hash %s, got %s", sym.QualifiedName, expected, actual)
+	}
+	return nil
+}
+
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func supportedRenameSymbol(sym Symbol) error {
+	switch sym.Kind {
+	case SymbolFunction, SymbolMethod, SymbolType, SymbolStruct, SymbolInterface, SymbolConst, SymbolVar:
+		return nil
+	case SymbolField:
+		return errors.New("editor: rename of Go struct fields is not supported")
+	case SymbolPackage:
+		return errors.New("editor: rename of Go packages is not supported")
+	default:
+		return fmt.Errorf("editor: rename of Go %s symbols is not supported", sym.Kind)
+	}
+}
+
+func isValidIdentifier(name string) bool {
+	if name == "" || name == "_" || token.Lookup(name) != token.IDENT {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c editCompiler) compileEnsureStructTag(ctx context.Context, op EnsureGoStructTag) ([]FileEdit, error) {
@@ -268,6 +396,10 @@ func expandLineRange(src []byte, r Range) Range {
 		end++
 	}
 	return Range{Start: Position{Offset: start}, End: Position{Offset: end}}
+}
+
+func deleteRangeForSymbol(src []byte, sym Symbol) Range {
+	return expandLineRange(src, sym.Location.Range)
 }
 
 func parseOne(p string, src []byte) (parsedFile, error) {
